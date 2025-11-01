@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run FastAPI Backend",
+      "type": "shell",
+      "command": "cd backend && venv\\Scripts\\activate && uvicorn app.main:app --reload",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Run Next.js Frontend",
+      "type": "shell",
+      "command": "cd frontend && npm run dev",
+      "problemMatcher": [],
+      "group": "build"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# Next.js build output
+.next/
+
+# Node dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# OS / IDE junk
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Python stuff
+__pycache__/
+venv/
+.venv/
+
+# Build artifacts
+dist/
+out/
+.turbo/
