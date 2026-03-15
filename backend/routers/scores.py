@@ -1,8 +1,8 @@
 """
 SportSync - Scores Router.
 
-Live and recent scores across all sports. Redis cached with short TTL
-because score data changes frequently during games.
+Live and recent scores across all sports. Redis cached with short TTL.
+Paginated (20 per page).
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -16,28 +16,36 @@ from constants import CACHE_TTL_LIVE_SCORES
 
 router = APIRouter(prefix="/api/scores", tags=["scores"])
 
+DEFAULT_PAGE_SIZE = 20
+
 
 @router.get("")
 async def get_scores(
     sport: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """Live and recent scores. Cached for 2 minutes since scores change often."""
-    cache_key = f"scores:{sport or 'all'}"
+    """Live and recent scores. Paginated, cached for 2 minutes."""
+    cache_key = f"scores:{sport or 'all'}:p{page}:s{page_size}"
     cached = get_cached(cache_key)
     if cached:
         return cached
 
     query = (
         db.query(Game)
-        .join(Team, Game.home_team_id == Team.id)
         .filter(Game.status.in_(["live", "final"]))
     )
 
     if sport:
         query = query.filter(Game.sport == sport)
 
-    games = query.order_by(Game.scheduled_at.desc()).limit(50).all()
+    games = (
+        query.order_by(Game.scheduled_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     result = []
     for g in games:

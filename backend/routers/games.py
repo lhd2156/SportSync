@@ -1,7 +1,7 @@
 """
 SportSync - Games Router.
 
-Upcoming and recent games. Supports sport/league filtering.
+Upcoming and recent games. Sport/league/status filtering. Paginated (20 per page).
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -16,15 +16,19 @@ from constants import CACHE_TTL_STANDINGS
 
 router = APIRouter(prefix="/api/games", tags=["games"])
 
+DEFAULT_PAGE_SIZE = 20
+
 
 @router.get("")
 async def list_games(
     sport: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """Upcoming and recent games, filter by sport or status."""
-    cache_key = f"games:{sport or 'all'}:{status or 'all'}"
+    """Upcoming and recent games, filter by sport or status. Paginated."""
+    cache_key = f"games:{sport or 'all'}:{status or 'all'}:p{page}:s{page_size}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -35,7 +39,12 @@ async def list_games(
     if status:
         query = query.filter(Game.status == status)
 
-    games = query.order_by(Game.scheduled_at.desc()).limit(50).all()
+    games = (
+        query.order_by(Game.scheduled_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
 
     result = []
     for g in games:
