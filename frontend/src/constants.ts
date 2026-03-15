@@ -55,6 +55,11 @@ export const API = {
   USER_FEED: "/api/user/feed",
   USER_TEAMS: "/api/user/teams",
   USER_PROFILE: "/api/user/profile",
+  SPORTS_EVENTS_DAY: "/api/sports/events/day",
+  SPORTS_EVENTS_PAST: "/api/sports/events/past",
+  SPORTS_EVENTS_NEXT: "/api/sports/events/next",
+  SPORTS_LEAGUE: "/api/sports/league",
+  SPORTS_TEAMS: "/api/sports/teams",
 } as const;
 
 /* Cookie names must match the backend exactly */

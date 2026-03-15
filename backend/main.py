@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from constants import APP_TITLE, APP_VERSION, APP_DESCRIPTION
 from database import engine, Base
-from routers import auth, user, teams, scores, games, predictions, feed
+from routers import auth, user, teams, scores, games, predictions, feed, sports
 
 # Import all models so tables are registered with SQLAlchemy
 import models.user  # noqa: F401
@@ -52,6 +52,7 @@ app.include_router(scores.router)
 app.include_router(games.router)
 app.include_router(predictions.router)
 app.include_router(feed.router)
+app.include_router(sports.router)
 
 
 @app.get("/api/health")

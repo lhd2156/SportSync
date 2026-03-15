@@ -16,6 +16,8 @@ import LiveBadge from "../components/LiveBadge";
 import NewsCard from "../components/NewsCard";
 import LiveActivityFeed from "../components/LiveActivityFeed";
 import Footer from "../components/Footer";
+import apiClient from "../api/client";
+import { API } from "../constants";
 
 /* ─── TheSportsDB league IDs ─── */
 const LEAGUE_MAP: Record<string, number> = {
@@ -93,7 +95,7 @@ export default function DashboardPage() {
   const [games, setGames] = useState<GameItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch events from TheSportsDB for selected date
+  // Fetch events via backend proxy (bypasses CORS)
   useEffect(() => {
     async function fetchEvents() {
       setIsLoading(true);
@@ -104,11 +106,10 @@ export default function DashboardPage() {
 
       const fetches = leagueEntries.map(async ([key, id]) => {
         try {
-          // Try events by day first
-          const resp = await fetch(
-            `https://www.thesportsdb.com/api/v1/json/3/eventsday.php?d=${dateStr}&l=${id}`
-          );
-          const data = await resp.json();
+          const resp = await apiClient.get(API.SPORTS_EVENTS_DAY, {
+            params: { d: dateStr, league_id: id },
+          });
+          const data = resp.data;
           if (data.events && Array.isArray(data.events)) {
             allGames.push(...data.events.map((e: SportsDBEvent) => mapEvent(e, key)));
           }
@@ -124,12 +125,11 @@ export default function DashboardPage() {
         const fallbackLeagues = [["NBA", 4387], ["NFL", 4391], ["EPL", 4328], ["NHL", 4380]] as const;
         const fallbackFetches = fallbackLeagues.map(async ([key, id]) => {
           try {
-            const resp = await fetch(
-              `https://www.thesportsdb.com/api/v1/json/3/eventspastleague.php?id=${id}`
-            );
-            const data = await resp.json();
+            const resp = await apiClient.get(API.SPORTS_EVENTS_PAST, {
+              params: { league_id: id },
+            });
+            const data = resp.data;
             if (data.events && Array.isArray(data.events)) {
-              // Take first 5 from each league
               allGames.push(...data.events.slice(0, 5).map((e: SportsDBEvent) => mapEvent(e, key as string)));
             }
           } catch {
