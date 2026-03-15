@@ -8,13 +8,12 @@ Routers call this service; it never imports from routers.
 import secrets
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from config import settings
 from constants import (
-    BCRYPT_COST_FACTOR,
     MAX_FAILED_LOGIN_ATTEMPTS,
     ACCOUNT_LOCKOUT_MINUTES,
     SESSION_TOKEN_BYTES,
@@ -24,18 +23,16 @@ from constants import (
 )
 from models.user import User
 
-# bcrypt context with configurable cost factor
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=BCRYPT_COST_FACTOR)
-
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password using bcrypt with cost factor 12."""
-    return pwd_context.hash(password)
+    """Hash a plaintext password using bcrypt."""
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Compare a plaintext password against its bcrypt hash."""
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 def create_access_token(user_id: str, expires_minutes: int | None = None) -> str:

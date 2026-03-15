@@ -160,7 +160,8 @@ async def login(
     # Store Remember Me session in Redis for long-lived access
     if body.remember_me:
         session_token = generate_session_token()
-        store_session_in_redis(redis_client, session_token, str(user.id))
+        if redis_client:
+            store_session_in_redis(redis_client, session_token, str(user.id))
         response.set_cookie(
             key="session_token",
             value=session_token,
@@ -239,7 +240,7 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token")
 
-    if is_token_blacklisted(redis_client, refresh_token):
+    if redis_client and is_token_blacklisted(redis_client, refresh_token):
         raise HTTPException(status_code=401, detail="Token revoked")
 
     payload = decode_token(refresh_token)
@@ -263,12 +264,12 @@ async def logout(request: Request, response: Response):
 
     if refresh_token:
         payload = decode_token(refresh_token)
-        if payload:
+        if payload and redis_client:
             exp = payload.get("exp", 0)
             remaining = max(int(exp - datetime.utcnow().timestamp()), 0)
             blacklist_token(redis_client, refresh_token, remaining)
 
-    if session_token:
+    if session_token and redis_client:
         delete_session_from_redis(redis_client, session_token)
 
     _clear_auth_cookies(response)

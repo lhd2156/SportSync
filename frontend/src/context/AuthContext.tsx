@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshAuth = useCallback(async () => {
     try {
       const response = await apiClient.post(API.AUTH_REFRESH);
-      setAccessToken(response.data.accessToken);
+      setAccessToken(response.data.access_token);
 
       const profileResponse = await apiClient.get(API.USER_PROFILE);
       setUser(profileResponse.data);
@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       remember_me: rememberMe,
     });
 
-    setAccessToken(response.data.accessToken);
+    setAccessToken(response.data.access_token);
 
     const profileResponse = await apiClient.get(API.USER_PROFILE);
     setUser(profileResponse.data);
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       gender: gender || null,
     });
 
-    setAccessToken(response.data.accessToken);
+    setAccessToken(response.data.access_token);
 
     const profileResponse = await apiClient.get(API.USER_PROFILE);
     setUser(profileResponse.data);

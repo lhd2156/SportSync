@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database
-    database_url: str = "postgresql://sportsync_user:sportsync_local_password@localhost:5432/sportsync"
+    database_url: str = "sqlite:///./sportsync.db"
 
     # Redis
     redis_url: str = "redis://localhost:6379"
