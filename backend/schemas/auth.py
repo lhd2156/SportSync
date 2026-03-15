@@ -7,11 +7,11 @@ All inputs validated here before any database query.
 from datetime import date
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str = Field(min_length=8, max_length=128)
     confirm_password: str = Field(min_length=8, max_length=128)
     first_name: str = Field(min_length=1, max_length=50)
@@ -20,11 +20,28 @@ class RegisterRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     gender: Optional[str] = None
 
+    @field_validator("email")
+    @classmethod
+    def email_must_have_at(cls, v: str) -> str:
+        if "@" not in v:
+            raise ValueError("Must be a valid email address")
+        return v.strip().lower()
+
+
+
+
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
     remember_me: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def email_must_have_at(cls, v: str) -> str:
+        if "@" not in v:
+            raise ValueError("Must be a valid email address")
+        return v.strip().lower()
 
 
 class GoogleAuthRequest(BaseModel):

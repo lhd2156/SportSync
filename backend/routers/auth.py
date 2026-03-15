@@ -244,6 +244,14 @@ async def google_auth(
         access_token=access_token,
         is_onboarded=user.is_onboarded,
         is_new_user=is_new,
+        user_id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        date_of_birth=str(user.date_of_birth) if user.date_of_birth else None,
+        gender=user.gender,
+        profile_picture_url=user.profile_picture_url,
+        first_name=getattr(user, 'first_name', None),
+        last_name=getattr(user, 'last_name', None),
     )
 
 
