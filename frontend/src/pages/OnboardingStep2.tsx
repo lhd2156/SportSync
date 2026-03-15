@@ -1,58 +1,85 @@
 /**
  * SportSync - Onboarding Step 2: Pick Your Sports
  *
- * Large cards with league logos + names. Selection is optional — user
- * can skip if they want. Smooth fade-in from step 1.
+ * Fetches real league logos from TheSportsDB API.
+ * Selection is optional — user can skip.
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import apiClient from "../api/client";
 import { API, ROUTES } from "../constants";
 
-/* League data with logo URLs from free CDN */
-const LEAGUES = [
-  {
-    id: "NFL",
-    label: "NFL",
-    sport: "Football",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/pdd02o1610466932.png",
-  },
-  {
-    id: "NBA",
-    label: "NBA",
-    sport: "Basketball",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/gkv4dg1689019974.png",
-  },
-  {
-    id: "MLB",
-    label: "MLB",
-    sport: "Baseball",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/bflwhs1737932027.png",
-  },
-  {
-    id: "NHL",
-    label: "NHL",
-    sport: "Hockey",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/w2pz651634918738.png",
-  },
-  {
-    id: "MLS",
-    label: "MLS",
-    sport: "Soccer",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/dqo6r91549878326.png",
-  },
-  {
-    id: "EPL",
-    label: "Premier League",
-    sport: "Soccer",
-    logo: "https://www.thesportsdb.com/images/media/league/badge/i6o0kh1549879062.png",
-  },
+/* TheSportsDB league IDs */
+const LEAGUE_IDS: { key: string; dbId: number; fallbackLabel: string; sport: string }[] = [
+  { key: "NFL", dbId: 4391, fallbackLabel: "NFL", sport: "Football" },
+  { key: "NBA", dbId: 4387, fallbackLabel: "NBA", sport: "Basketball" },
+  { key: "MLB", dbId: 4424, fallbackLabel: "MLB", sport: "Baseball" },
+  { key: "NHL", dbId: 4380, fallbackLabel: "NHL", sport: "Hockey" },
+  { key: "MLS", dbId: 4346, fallbackLabel: "MLS", sport: "Soccer" },
+  { key: "EPL", dbId: 4328, fallbackLabel: "Premier League", sport: "Soccer" },
 ];
+
+interface LeagueData {
+  id: string;
+  label: string;
+  sport: string;
+  logo: string;
+}
 
 export default function OnboardingStep2() {
   const navigate = useNavigate();
+  const [leagues, setLeagues] = useState<LeagueData[]>([]);
   const [selectedSports, setSelectedSports] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch league data from TheSportsDB
+  useEffect(() => {
+    async function fetchLeagues() {
+      const results: LeagueData[] = [];
+
+      const fetches = LEAGUE_IDS.map(async (league) => {
+        try {
+          const resp = await fetch(
+            `https://www.thesportsdb.com/api/v1/json/3/lookupleague.php?id=${league.dbId}`
+          );
+          const data = await resp.json();
+          if (data.leagues && data.leagues[0]) {
+            const l = data.leagues[0];
+            results.push({
+              id: league.key,
+              label: l.strLeague || league.fallbackLabel,
+              sport: league.sport,
+              logo: l.strBadge ? `${l.strBadge}/small` : "",
+            });
+          } else {
+            results.push({
+              id: league.key,
+              label: league.fallbackLabel,
+              sport: league.sport,
+              logo: "",
+            });
+          }
+        } catch {
+          results.push({
+            id: league.key,
+            label: league.fallbackLabel,
+            sport: league.sport,
+            logo: "",
+          });
+        }
+      });
+
+      await Promise.all(fetches);
+      // Sort to maintain consistent order
+      const order = LEAGUE_IDS.map((l) => l.key);
+      results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+      setLeagues(results);
+      setIsLoading(false);
+    }
+
+    fetchLeagues();
+  }, []);
 
   function toggleSport(sportId: string) {
     setSelectedSports((prev) =>
@@ -72,17 +99,26 @@ export default function OnboardingStep2() {
       }
       navigate(ROUTES.ONBOARDING_STEP_3);
     } catch {
-      // If the API call fails, still navigate — sports are optional
       navigate(ROUTES.ONBOARDING_STEP_3);
     } finally {
       setIsSubmitting(false);
     }
   }
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-muted text-sm">Loading leagues...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4 py-12 animate-fadeIn">
       <div className="w-full max-w-lg">
-        {/* Progress indicator */}
         <OnboardingProgress currentStep={2} />
 
         <div className="text-center mb-8">
@@ -91,7 +127,7 @@ export default function OnboardingStep2() {
         </div>
 
         <div className="grid grid-cols-2 gap-4 mb-8">
-          {LEAGUES.map((league) => {
+          {leagues.map((league) => {
             const isSelected = selectedSports.includes(league.id);
             return (
               <button
@@ -103,16 +139,22 @@ export default function OnboardingStep2() {
                     : "border-muted/20 bg-surface hover:border-muted/40 hover:bg-surface/80"
                 }`}
               >
-                <img
-                  src={league.logo}
-                  alt={league.label}
-                  className="w-14 h-14 object-contain"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
+                {league.logo ? (
+                  <img
+                    src={league.logo}
+                    alt={league.label}
+                    className="w-14 h-14 object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div className="w-14 h-14 bg-muted/20 rounded-full flex items-center justify-center text-xs font-bold text-muted">
+                    {league.id}
+                  </div>
+                )}
                 <div className="text-center">
-                  <span className="text-base font-bold block text-foreground">{league.label}</span>
+                  <span className="text-base font-bold block text-foreground">{league.id}</span>
                   <span className="text-xs text-muted">{league.sport}</span>
                 </div>
                 {isSelected && (

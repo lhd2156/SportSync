@@ -13,57 +13,8 @@ import apiClient from "../api/client";
 import { API, ROUTES } from "../constants";
 import { isOldEnough } from "../utils/age";
 
-/* ─── Smart DOB parsing ─── */
-function parseDobInput(raw: string): string {
-  // If already a valid yyyy-mm-dd, return as-is
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+import { parseDobInput, formatDobDisplay, autoFormatDobText } from "../utils/dob";
 
-  // Strip everything except digits
-  const digits = raw.replace(/\D/g, "");
-
-  let month = "";
-  let day = "";
-  let year = "";
-
-  if (digits.length === 8) {
-    // MMDDYYYY
-    month = digits.slice(0, 2);
-    day = digits.slice(2, 4);
-    year = digits.slice(4, 8);
-  } else if (digits.length === 7) {
-    // M/DD/YYYY or MM/D/YYYY — try both
-    const m1 = digits.slice(0, 1);
-    const d1 = digits.slice(1, 3);
-    const y1 = digits.slice(3, 7);
-    if (Number(m1) >= 1 && Number(m1) <= 9 && Number(d1) >= 1 && Number(d1) <= 31) {
-      month = m1.padStart(2, "0");
-      day = d1;
-      year = y1;
-    } else {
-      month = digits.slice(0, 2);
-      day = digits.slice(2, 3).padStart(2, "0");
-      year = digits.slice(3, 7);
-    }
-  } else if (digits.length === 6) {
-    // MDDYYY? not valid — skip
-    return "";
-  } else {
-    return "";
-  }
-
-  const m = Number(month);
-  const d = Number(day);
-  const y = Number(year);
-  if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1900 || y > 2100) return "";
-
-  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-}
-
-function formatDobDisplay(isoDate: string): string {
-  if (!isoDate) return "";
-  const [y, m, d] = isoDate.split("-");
-  return `${Number(m)}/${Number(d)}/${y}`;
-}
 
 export default function OnboardingStep1() {
   const { user, setUser } = useAuth();
@@ -79,9 +30,10 @@ export default function OnboardingStep1() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleDobTextChange(val: string) {
-    setDobDisplay(val);
-    // Try to parse as we type
-    const parsed = parseDobInput(val);
+    const formatted = autoFormatDobText(val);
+    setDobDisplay(formatted);
+    // Try to parse
+    const parsed = parseDobInput(formatted);
     if (parsed) {
       setDobIso(parsed);
       setErrors((e) => ({ ...e, dob: "" }));

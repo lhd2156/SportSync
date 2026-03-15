@@ -13,6 +13,7 @@ import Logo from "../components/Logo";
 import AgeGate, { calculateAge } from "../components/AgeGate";
 import Footer from "../components/Footer";
 import GoogleSignInButton from "../components/GoogleSignInButton";
+import { parseDobInput, formatDobDisplay, autoFormatDobText } from "../utils/dob";
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -23,6 +24,7 @@ export default function RegisterPage() {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
+  const [dobDisplay, setDobDisplay] = useState("");
   const [gender, setGender] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -119,7 +121,43 @@ export default function RegisterPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="reg-dob" className="block text-sm text-muted mb-1">Date of Birth</label>
-                  <input id="reg-dob" type="date" required value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} className={inputCls} />
+                  <div className="flex gap-1.5">
+                    <input
+                      id="reg-dob"
+                      type="text"
+                      required
+                      value={dobDisplay}
+                      onChange={(e) => {
+                        const formatted = autoFormatDobText(e.target.value);
+                        setDobDisplay(formatted);
+                        const parsed = parseDobInput(formatted);
+                        if (parsed) {
+                          setDateOfBirth(parsed);
+                        } else {
+                          setDateOfBirth("");
+                        }
+                      }}
+                      className={inputCls + " flex-1"}
+                      placeholder="MM/DD/YYYY"
+                    />
+                    <div className="relative">
+                      <input
+                        type="date"
+                        value={dateOfBirth}
+                        onChange={(e) => {
+                          setDateOfBirth(e.target.value);
+                          setDobDisplay(formatDobDisplay(e.target.value));
+                        }}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                        tabIndex={-1}
+                      />
+                      <button type="button" className="h-full px-2.5 bg-background border border-muted/20 rounded-lg text-muted hover:text-foreground hover:border-muted/40 transition-all flex items-center" tabIndex={-1}>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <label htmlFor="reg-gender" className="block text-sm text-muted mb-1">Gender</label>
