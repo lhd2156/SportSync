@@ -1,7 +1,7 @@
 """
 SportSync - Teams Router.
 
-Browse teams, filter by sport/league. Redis cached.
+Browse teams, filter by sport/league. Redis cached. Paginated (20 per page).
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -15,15 +15,19 @@ from constants import CACHE_TTL_TEAM_DATA
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
+DEFAULT_PAGE_SIZE = 20
+
 
 @router.get("", response_model=list[TeamResponse])
 async def list_teams(
     sport: Optional[str] = Query(None),
     league: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """All teams, optionally filtered by sport and league. Redis cached."""
-    cache_key = f"teams:{sport or 'all'}:{league or 'all'}"
+    """All teams, optionally filtered by sport and league. Paginated, Redis cached."""
+    cache_key = f"teams:{sport or 'all'}:{league or 'all'}:p{page}:s{page_size}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -34,7 +38,14 @@ async def list_teams(
     if league:
         query = query.filter(Team.league == league)
 
-    teams = query.order_by(Team.name).all()
+    total = query.count()
+    teams = (
+        query.order_by(Team.name)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
     result = [
         TeamResponse(
             id=str(t.id),

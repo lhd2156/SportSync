@@ -1,7 +1,8 @@
 """
-SportSync - Model Registry.
+SportSync Models Package.
 
-Import all models here so SQLAlchemy discovers them for migrations.
+Re-exports all ORM models so Alembic and application code
+can import them with a single `import models`.
 """
 from models.user import User
 from models.team import Team, UserTeam, UserSport

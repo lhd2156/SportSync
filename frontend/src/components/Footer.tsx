@@ -6,6 +6,7 @@
  */
 import { Link } from "react-router-dom";
 import { APP_NAME, APP_VERSION, ROUTES } from "../constants";
+import Logo from "./Logo";
 
 export default function Footer() {
   return (
@@ -14,9 +15,7 @@ export default function Footer() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 mb-8">
           {/* Brand */}
           <div>
-            <Link to={ROUTES.HOME} className="text-xl font-bold text-accent">
-              {APP_NAME}
-            </Link>
+            <Logo size="sm" linkTo={ROUTES.HOME} />
             <p className="text-muted text-sm mt-2">
               Your personalized sports command center.
             </p>

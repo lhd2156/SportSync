@@ -12,6 +12,8 @@ export interface User {
   profilePictureUrl: string | null;
   isOnboarded: boolean;
   createdAt: string;
+  sports: string[];
+  provider: string | null;
 }
 
 export interface Team {
