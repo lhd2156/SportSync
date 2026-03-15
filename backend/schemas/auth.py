@@ -71,11 +71,11 @@ class OnboardingStep1Request(BaseModel):
 
 
 class OnboardingStep2Request(BaseModel):
-    sports: list[str] = Field(min_length=1)
+    sports: list[str] = Field(default_factory=list)
 
 
 class OnboardingCompleteRequest(BaseModel):
-    team_ids: list[str] = Field(min_length=1)
+    team_ids: list[str] = Field(default_factory=list)
 
 
 class SetPasswordRequest(BaseModel):
