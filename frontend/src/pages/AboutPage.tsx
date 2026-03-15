@@ -5,6 +5,7 @@
  */
 import { Link } from "react-router-dom";
 import Footer from "../components/Footer";
+import Logo from "../components/Logo";
 import { ROUTES, APP_VERSION } from "../constants";
 
 export default function AboutPage() {
@@ -12,7 +13,7 @@ export default function AboutPage() {
     <div className="min-h-screen bg-background text-foreground-base">
       <header className="border-b border-muted/20 py-4 px-6">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Link to={ROUTES.HOME} className="text-xl font-bold text-accent">SportSync</Link>
+          <Logo size="sm" />
           <Link to={ROUTES.HOME} className="text-sm text-muted hover:text-foreground transition-colors">
             ← Back to Home
           </Link>
@@ -32,23 +33,23 @@ export default function AboutPage() {
             <h2 className="text-lg font-semibold text-foreground mb-3">Features</h2>
             <ul className="space-y-2">
               <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">⚡</span>
+                <span className="text-accent mt-0.5 font-bold">--</span>
                 <span><strong>Real-Time Scores:</strong> Live score updates via WebSocket with sub-second latency</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">🎯</span>
+                <span className="text-accent mt-0.5 font-bold">--</span>
                 <span><strong>Personalized Feed:</strong> Your saved teams always appear first, followed by their leagues, your sports, then explore</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">🤖</span>
+                <span className="text-accent mt-0.5 font-bold">--</span>
                 <span><strong>ML Predictions:</strong> Win probability predictions powered by Random Forest models trained on historical data</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">🔒</span>
+                <span className="text-accent mt-0.5 font-bold">--</span>
                 <span><strong>Privacy-First:</strong> JWTs stored in memory only, HTTP-only cookies, bcrypt hashing, and full cookie consent management</span>
               </li>
               <li className="flex items-start gap-2">
-                <span className="text-accent mt-0.5">🏟️</span>
+                <span className="text-accent mt-0.5 font-bold">--</span>
                 <span><strong>6 Sports Supported:</strong> NFL, NBA, MLB, NHL, MLS, and English Premier League</span>
               </li>
             </ul>

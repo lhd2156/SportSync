@@ -1,13 +1,14 @@
 /**
  * SportSync - Login Page
  *
- * Email/password form with Remember Me checkbox and Google OAuth button.
- * Handles account lockout display and validation errors.
+ * Email/password form with Remember Me checkbox, Google OAuth,
+ * account lockout display. Scrollable layout with footer below fold.
  */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
+import Logo from "../components/Logo";
 import Footer from "../components/Footer";
 
 export default function LoginPage() {
@@ -38,18 +39,16 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <Link to={ROUTES.HOME} className="text-3xl font-bold text-accent">
-              SportSync
-            </Link>
-            <p className="text-muted mt-2">Welcome back</p>
+      <div className="flex-1 px-4 pt-12 pb-8">
+        <div className="w-full max-w-md mx-auto">
+          {/* Header with logo */}
+          <div className="text-center mb-10">
+            <Logo size="lg" />
+            <p className="text-muted mt-3 text-lg">Welcome back</p>
           </div>
 
           {/* Login form */}
-          <form onSubmit={handleSubmit} className="bg-surface border border-muted/20 rounded-xl p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg px-4 py-3">
                 {error}
@@ -66,7 +65,7 @@ export default function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-background border border-muted/30 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -81,36 +80,46 @@ export default function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-background border border-muted/30 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
                 placeholder="Enter your password"
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              <input
-                id="remember-me"
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded border-muted/30 accent-accent"
-              />
-              <label htmlFor="remember-me" className="text-sm text-foreground-base">
-                Remember Me
-              </label>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-4 h-4 rounded border-muted/30 accent-accent"
+                />
+                <label htmlFor="remember-me" className="text-sm text-foreground-base">
+                  Remember Me
+                </label>
+              </div>
+              <span className="text-xs text-muted">Keeps you signed in for 30 days</span>
             </div>
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3 bg-accent hover:bg-accent-hover text-foreground font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3.5 bg-accent hover:bg-accent-hover text-foreground font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? "Signing in..." : "Sign In"}
             </button>
 
-            {/* Google OAuth button */}
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-muted/20" />
+              <span className="text-muted text-xs">or</span>
+              <div className="flex-1 h-px bg-muted/20" />
+            </div>
+
+            {/* Google OAuth */}
             <button
               type="button"
-              className="w-full py-3 bg-foreground text-background-base font-semibold rounded-lg flex items-center justify-center gap-3 hover:bg-foreground-base transition-colors"
+              className="w-full py-3.5 bg-white text-gray-800 font-semibold rounded-lg flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
@@ -123,7 +132,7 @@ export default function LoginPage() {
 
             <p className="text-center text-sm text-muted">
               No account?{" "}
-              <Link to={ROUTES.REGISTER} className="text-accent hover:text-accent-hover">
+              <Link to={ROUTES.REGISTER} className="text-accent hover:text-accent-hover font-medium">
                 Create one
               </Link>
             </p>

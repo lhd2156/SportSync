@@ -7,6 +7,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES, SUPPORTED_SPORTS } from "../constants";
+import Logo from "./Logo";
 
 export default function Navbar() {
   const { user, logout } = useAuth();
@@ -17,9 +18,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4">
         {/* Top row: logo + user actions */}
         <div className="flex items-center justify-between h-14">
-          <Link to={ROUTES.DASHBOARD} className="text-xl font-bold text-accent">
-            SportSync
-          </Link>
+          <Logo size="md" linkTo={ROUTES.DASHBOARD} />
 
           <div className="flex items-center gap-4">
             <Link

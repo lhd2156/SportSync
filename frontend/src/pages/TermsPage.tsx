@@ -5,6 +5,7 @@
  */
 import { Link } from "react-router-dom";
 import Footer from "../components/Footer";
+import Logo from "../components/Logo";
 import { ROUTES } from "../constants";
 
 export default function TermsPage() {
@@ -12,7 +13,7 @@ export default function TermsPage() {
     <div className="min-h-screen bg-background text-foreground-base">
       <header className="border-b border-muted/20 py-4 px-6">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Link to={ROUTES.HOME} className="text-xl font-bold text-accent">SportSync</Link>
+          <Logo size="sm" />
           <Link to={ROUTES.HOME} className="text-sm text-muted hover:text-foreground transition-colors">
             ← Back to Home
           </Link>

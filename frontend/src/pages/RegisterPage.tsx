@@ -1,13 +1,14 @@
 /**
  * SportSync - Register Page
  *
- * Email/password registration with confirm password, Google OAuth,
- * and legal disclaimer linking to Terms and Privacy Policy.
+ * Scrollable layout: form at the top, legal and footer below the fold.
+ * Password strength guide, Google OAuth button, consistent branding.
  */
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
+import Logo from "../components/Logo";
 import Footer from "../components/Footer";
 
 export default function RegisterPage() {
@@ -20,8 +21,17 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const passwordChecks = useMemo(() => ({
+    length: password.length >= 8,
+    uppercase: /[A-Z]/.test(password),
+    lowercase: /[a-z]/.test(password),
+    number: /[0-9]/.test(password),
+  }), [password]);
+
+  const passwordStrong = Object.values(passwordChecks).every(Boolean);
+
   function validate(): string | null {
-    if (password.length < 8) return "Password must be at least 8 characters.";
+    if (!passwordStrong) return "Password does not meet all requirements.";
     if (password !== confirmPassword) return "Passwords do not match.";
     return null;
   }
@@ -50,18 +60,17 @@ export default function RegisterPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        <div className="w-full max-w-md">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <Link to={ROUTES.HOME} className="text-3xl font-bold text-accent">
-              SportSync
-            </Link>
-            <p className="text-muted mt-2">Create your account</p>
+      {/* Scrollable content - not vertically centered so it doesn't feel cramped */}
+      <div className="flex-1 px-4 pt-12 pb-8">
+        <div className="w-full max-w-md mx-auto">
+          {/* Header with logo */}
+          <div className="text-center mb-10">
+            <Logo size="lg" />
+            <p className="text-muted mt-3 text-lg">Create your account</p>
           </div>
 
           {/* Registration form */}
-          <form onSubmit={handleSubmit} className="bg-surface border border-muted/20 rounded-xl p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
               <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg px-4 py-3">
                 {error}
@@ -78,7 +87,7 @@ export default function RegisterPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-background border border-muted/30 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
                 placeholder="you@example.com"
               />
             </div>
@@ -93,9 +102,18 @@ export default function RegisterPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-background border border-muted/30 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:outline-none transition-colors"
-                placeholder="At least 8 characters"
+                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
+                placeholder="Create a strong password"
               />
+              {/* Password strength guide */}
+              {password.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  <PasswordRule passed={passwordChecks.length} text="At least 8 characters" />
+                  <PasswordRule passed={passwordChecks.uppercase} text="One uppercase letter" />
+                  <PasswordRule passed={passwordChecks.lowercase} text="One lowercase letter" />
+                  <PasswordRule passed={passwordChecks.number} text="One number" />
+                </div>
+              )}
             </div>
 
             <div>
@@ -108,23 +126,33 @@ export default function RegisterPage() {
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-background border border-muted/30 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
                 placeholder="Confirm your password"
               />
+              {confirmPassword.length > 0 && password !== confirmPassword && (
+                <p className="text-red-400 text-xs mt-1">Passwords do not match</p>
+              )}
             </div>
 
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3 bg-accent hover:bg-accent-hover text-foreground font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isSubmitting || !passwordStrong}
+              className="w-full py-3.5 bg-accent hover:bg-accent-hover text-foreground font-semibold rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isSubmitting ? "Creating account..." : "Create Account"}
             </button>
 
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-muted/20" />
+              <span className="text-muted text-xs">or</span>
+              <div className="flex-1 h-px bg-muted/20" />
+            </div>
+
             {/* Google OAuth */}
             <button
               type="button"
-              className="w-full py-3 bg-foreground text-background-base font-semibold rounded-lg flex items-center justify-center gap-3 hover:bg-foreground-base transition-colors"
+              className="w-full py-3.5 bg-white text-gray-800 font-semibold rounded-lg flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
@@ -135,7 +163,16 @@ export default function RegisterPage() {
               Continue with Google
             </button>
 
-            {/* Legal disclaimer */}
+            <p className="text-center text-sm text-muted">
+              Already have an account?{" "}
+              <Link to={ROUTES.LOGIN} className="text-accent hover:text-accent-hover font-medium">
+                Sign in
+              </Link>
+            </p>
+          </form>
+
+          {/* Legal disclaimer - below the fold, naturally scrollable */}
+          <div className="mt-10 pt-6 border-t border-muted/10">
             <p className="text-center text-xs text-muted leading-relaxed">
               By creating an account you agree to our{" "}
               <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover underline">
@@ -144,20 +181,27 @@ export default function RegisterPage() {
               and{" "}
               <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover underline">
                 Privacy Policy
-              </a>
+              </a>.
+              You must be 18 years of age or older to use SportSync.
             </p>
-
-            <p className="text-center text-sm text-muted">
-              Already have an account?{" "}
-              <Link to={ROUTES.LOGIN} className="text-accent hover:text-accent-hover">
-                Sign in
-              </Link>
-            </p>
-          </form>
+          </div>
         </div>
       </div>
 
       <Footer />
+    </div>
+  );
+}
+
+function PasswordRule({ passed, text }: { passed: boolean; text: string }) {
+  return (
+    <div className={`flex items-center gap-2 text-xs transition-colors ${passed ? "text-green-400" : "text-muted"}`}>
+      <span className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center text-[9px] ${
+        passed ? "border-green-400 bg-green-400/10" : "border-muted/40"
+      }`}>
+        {passed && "✓"}
+      </span>
+      {text}
     </div>
   );
 }
