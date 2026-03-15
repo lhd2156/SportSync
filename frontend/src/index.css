@@ -1,0 +1,90 @@
+/*
+  SportSync Design System - Global Styles
+  Dark mode only. Colors and tokens defined here and in Tailwind config.
+  Never use pure black (#000000). Use the design tokens below.
+*/
+
+@import "tailwindcss";
+
+/* Custom design tokens accessible from both CSS and Tailwind */
+:root {
+  --accent: #2E8EFF;
+  --accent-hover: #2575E6;
+  --background: #0B0E19;
+  --background-base: #0A0A0A;
+  --surface: #121212;
+  --foreground: #FFFFFF;
+  --foreground-base: #EDEDED;
+  --muted: #9CA3AF;
+}
+
+/* Tailwind v4 theme tokens for use in utility classes */
+@theme {
+  --color-accent: #2E8EFF;
+  --color-accent-hover: #2575E6;
+  --color-background: #0B0E19;
+  --color-background-base: #0A0A0A;
+  --color-surface: #121212;
+  --color-foreground: #FFFFFF;
+  --color-foreground-base: #EDEDED;
+  --color-muted: #9CA3AF;
+}
+
+/* Base styles applied to the document root */
+html {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background-color: var(--background);
+}
+
+/* Focus rings for accessibility on all interactive elements */
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling for the dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Smooth scrolling for the entire page */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Animation for live score pulsing indicator */
+@keyframes pulse-live {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.animate-pulse-live {
+  animation: pulse-live 1.5s ease-in-out infinite;
+}
