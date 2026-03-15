@@ -34,6 +34,7 @@ import DashboardPage from "./pages/DashboardPage";
 import ScoresPage from "./pages/ScoresPage";
 import TeamsPage from "./pages/TeamsPage";
 import GameDetailPage from "./pages/GameDetailPage";
+import TeamDetailPage from "./pages/TeamDetailPage";
 import SettingsPage from "./pages/SettingsPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -74,6 +75,7 @@ export default function App() {
               <Route path={ROUTES.DASHBOARD} element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
               <Route path={ROUTES.SCORES} element={<ProtectedRoute><ScoresPage /></ProtectedRoute>} />
               <Route path={ROUTES.TEAMS} element={<ProtectedRoute><TeamsPage /></ProtectedRoute>} />
+              <Route path={ROUTES.TEAM_DETAIL} element={<ProtectedRoute><TeamDetailPage /></ProtectedRoute>} />
               <Route path={ROUTES.GAME_DETAIL} element={<ProtectedRoute><GameDetailPage /></ProtectedRoute>} />
               <Route path={ROUTES.SETTINGS} element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
             </Routes>
