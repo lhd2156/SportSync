@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from constants import APP_TITLE, APP_VERSION, APP_DESCRIPTION
-from routers import auth, user
+from routers import auth, user, teams, scores, games, predictions, feed
 
 app = FastAPI(
     title=APP_TITLE,
@@ -26,9 +26,14 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Mount route handlers
+# Mount all route handlers
 app.include_router(auth.router)
 app.include_router(user.router)
+app.include_router(teams.router)
+app.include_router(scores.router)
+app.include_router(games.router)
+app.include_router(predictions.router)
+app.include_router(feed.router)
 
 
 @app.get("/api/health")
