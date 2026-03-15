@@ -1,5 +1,61 @@
-node_modules
-__pycache__
-venv
+# Environment and Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+
+# ML Model (trained artifact, never commit)
+backend/ml/model.pkl
+backend/ml/*.pkl
+backend/ml/*.joblib
+
+# Go
+realtime/bin/
+realtime/*.exe
+
+# Node and Frontend
+node_modules/
+frontend/dist/
+frontend/build/
+.next/
+*.tsbuildinfo
+.eslintcache
+
+# Docker
+docker-compose.override.yml
+
+# OS and Editor
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# AWS
+.aws/
+*.tfstate
+*.tfstate.*
+
+# Alembic (keep migration scripts, only ignore temp files)
+backend/migrations/__pycache__/
