@@ -1,8 +1,8 @@
 /**
  * SportSync - Login Page
  *
- * Email/password form with Remember Me checkbox, Google OAuth,
- * account lockout display. Scrollable layout with footer below fold.
+ * Clean, professional auth page. The form fills the entire viewport.
+ * Footer and legal text only visible on scroll.
  */
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -25,7 +25,6 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setIsSubmitting(true);
-
     try {
       await login(email, password, rememberMe);
       navigate(ROUTES.DASHBOARD);
@@ -38,90 +37,82 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <div className="flex-1 px-4 pt-12 pb-8">
-        <div className="w-full max-w-md mx-auto">
-          {/* Header with logo */}
+    <div className="bg-background text-foreground">
+      {/* Full viewport section — form only, nothing else visible */}
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-sm">
+          {/* Logo */}
           <div className="text-center mb-10">
             <Logo size="lg" />
-            <p className="text-muted mt-3 text-lg">Welcome back</p>
+            <p className="text-muted mt-2">Welcome back</p>
           </div>
 
-          {/* Login form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm rounded-lg px-4 py-3">
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
                 {error}
               </div>
             )}
 
             <div>
-              <label htmlFor="login-email" className="block text-sm text-foreground-base mb-1.5">
-                Email
-              </label>
+              <label htmlFor="login-email" className="block text-sm text-foreground-base mb-1">Email</label>
               <input
                 id="login-email"
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/20 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:ring-1 focus:ring-accent/30 focus:outline-none transition-all placeholder:text-muted/50"
                 placeholder="you@example.com"
               />
             </div>
 
             <div>
-              <label htmlFor="login-password" className="block text-sm text-foreground-base mb-1.5">
-                Password
-              </label>
+              <label htmlFor="login-password" className="block text-sm text-foreground-base mb-1">Password</label>
               <input
                 id="login-password"
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-surface border border-muted/30 text-foreground rounded-lg px-4 py-3 focus:border-accent focus:outline-none transition-colors"
+                className="w-full bg-surface border border-muted/20 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:ring-1 focus:ring-accent/30 focus:outline-none transition-all placeholder:text-muted/50"
                 placeholder="Enter your password"
               />
             </div>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer">
                 <input
-                  id="remember-me"
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
                   className="w-4 h-4 rounded border-muted/30 accent-accent"
                 />
-                <label htmlFor="remember-me" className="text-sm text-foreground-base">
-                  Remember Me
-                </label>
-              </div>
-              <span className="text-xs text-muted">Keeps you signed in for 30 days</span>
+                <span className="text-sm text-foreground-base select-none">Remember me</span>
+              </label>
+              <span className="text-xs text-muted/60">30 days</span>
             </div>
 
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3.5 bg-accent hover:bg-accent-hover text-foreground font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed mt-2"
             >
               {isSubmitting ? "Signing in..." : "Sign In"}
             </button>
 
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-muted/20" />
-              <span className="text-muted text-xs">or</span>
-              <div className="flex-1 h-px bg-muted/20" />
+            <div className="flex items-center gap-3 py-1">
+              <div className="flex-1 h-px bg-muted/15" />
+              <span className="text-muted/40 text-xs">or</span>
+              <div className="flex-1 h-px bg-muted/15" />
             </div>
 
-            {/* Google OAuth */}
             <button
               type="button"
-              className="w-full py-3.5 bg-white text-gray-800 font-semibold rounded-lg flex items-center justify-center gap-3 hover:bg-gray-100 transition-colors"
+              className="w-full py-3 bg-white text-gray-800 font-medium rounded-lg flex items-center justify-center gap-3 hover:bg-gray-50 transition-all shadow-sm"
             >
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
+              <svg className="w-4.5 h-4.5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
                 <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
@@ -130,16 +121,15 @@ export default function LoginPage() {
               Continue with Google
             </button>
 
-            <p className="text-center text-sm text-muted">
+            <p className="text-center text-sm text-muted pt-2">
               No account?{" "}
-              <Link to={ROUTES.REGISTER} className="text-accent hover:text-accent-hover font-medium">
-                Create one
-              </Link>
+              <Link to={ROUTES.REGISTER} className="text-accent hover:text-accent-hover">Create one</Link>
             </p>
           </form>
         </div>
       </div>
 
+      {/* Footer only visible on scroll */}
       <Footer />
     </div>
   );
