@@ -27,6 +27,8 @@ class User(Base):
     google_id = Column(String, nullable=True, unique=True)
 
     display_name = Column(String(100), nullable=True)
+    first_name = Column(String(50), nullable=True)
+    last_name = Column(String(50), nullable=True)
     date_of_birth = Column(Date, nullable=True)
     gender = Column(String(50), nullable=True)
     profile_picture_url = Column(String, nullable=True)

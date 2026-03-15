@@ -16,7 +16,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string, rememberMe: boolean) => Promise<void>;
-  register: (email: string, password: string, confirmPassword: string) => Promise<void>;
+  register: (email: string, password: string, confirmPassword: string, firstName: string, lastName: string, displayName: string, dateOfBirth: string, gender: string | null) => Promise<void>;
   loginWithGoogle: (googleToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
@@ -67,11 +67,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     password: string,
     confirmPassword: string,
+    firstName: string,
+    lastName: string,
+    displayName: string,
+    dateOfBirth: string,
+    gender: string | null,
   ) => {
     const response = await apiClient.post(API.AUTH_REGISTER, {
       email,
       password,
       confirm_password: confirmPassword,
+      first_name: firstName,
+      last_name: lastName,
+      display_name: displayName,
+      date_of_birth: dateOfBirth,
+      gender: gender || null,
     });
 
     setAccessToken(response.data.accessToken);

@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
 
     # CORS
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://localhost:5174"
 
     # Environment
     environment: str = "development"

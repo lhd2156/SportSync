@@ -87,11 +87,19 @@ async def register(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    """Create a new account with email and password."""
+    """Create a new account with email, password, date of birth, and display name."""
     check_rate_limit(request, "register")
 
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    # Enforce 18+ age requirement at registration
+    age = _calculate_age(body.date_of_birth)
+    if age < MINIMUM_AGE_YEARS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be 18 or older to use SportSync",
+        )
 
     existing = db.query(User).filter(User.email == body.email.lower()).first()
     if existing:
@@ -100,6 +108,11 @@ async def register(
     user = User(
         email=body.email.lower(),
         hashed_password=hash_password(body.password),
+        first_name=body.first_name,
+        last_name=body.last_name,
+        display_name=body.display_name,
+        date_of_birth=body.date_of_birth,
+        gender=body.gender,
         is_onboarded=False,
     )
     db.add(user)
