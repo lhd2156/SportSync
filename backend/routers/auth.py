@@ -11,7 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from database import get_db
+from dependencies import get_current_user
 from models.user import User
+from models.team import UserSport, UserTeam
 from schemas.auth import (
     RegisterRequest,
     LoginRequest,
@@ -71,6 +73,11 @@ def _calculate_age(dob: date) -> int:
     if (today.month, today.day) < (dob.month, dob.day):
         age -= 1
     return age
+
+
+# ──────────────────────────────────────────────────────────────
+# Public Endpoints (no auth required)
+# ──────────────────────────────────────────────────────────────
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -164,8 +171,8 @@ async def google_auth(
     db: Session = Depends(get_db),
 ):
     """Authenticate or register via Google OAuth 2.0."""
-    # Verify the Google token server-side
     import httpx
+
     async with httpx.AsyncClient() as client:
         google_resp = await client.get(
             f"https://oauth2.googleapis.com/tokeninfo?id_token={body.google_token}"
@@ -185,7 +192,6 @@ async def google_auth(
     is_new = False
 
     if not user:
-        # Create new user from Google data
         user = User(
             email=email,
             google_id=google_id,
@@ -198,7 +204,6 @@ async def google_auth(
         db.refresh(user)
         is_new = True
     else:
-        # Link Google ID if not already linked
         if not user.google_id:
             user.google_id = google_id
             db.commit()
@@ -243,7 +248,6 @@ async def logout(request: Request, response: Response):
     refresh_token = request.cookies.get("refresh_token")
     session_token = request.cookies.get("session_token")
 
-    # Blacklist the refresh token until it naturally expires
     if refresh_token:
         payload = decode_token(refresh_token)
         if payload:
@@ -251,7 +255,6 @@ async def logout(request: Request, response: Response):
             remaining = max(int(exp - datetime.utcnow().timestamp()), 0)
             blacklist_token(redis_client, refresh_token, remaining)
 
-    # Remove Remember Me session from Redis
     if session_token:
         delete_session_from_redis(redis_client, session_token)
 
@@ -259,10 +262,15 @@ async def logout(request: Request, response: Response):
     return {"detail": "Logged out"}
 
 
+# ──────────────────────────────────────────────────────────────
+# Protected Endpoints (auth required via get_current_user)
+# ──────────────────────────────────────────────────────────────
+
+
 @router.post("/onboarding/step-1")
 async def onboarding_step_1(
     body: OnboardingStep1Request,
-    request: Request,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save personal info. Enforces 18+ age requirement server-side."""
@@ -272,17 +280,6 @@ async def onboarding_step_1(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be 18 or older to use SportSync",
         )
-
-    # Get current user from JWT (simplified; full impl in dependencies.py)
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.replace("Bearer ", "")
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user = db.query(User).filter(User.id == payload["sub"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
 
     user.display_name = body.display_name
     user.date_of_birth = body.date_of_birth
@@ -297,24 +294,13 @@ async def onboarding_step_1(
 @router.post("/onboarding/step-2")
 async def onboarding_step_2(
     body: OnboardingStep2Request,
-    request: Request,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save selected sports from onboarding."""
-    from models.team import UserSport
-
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.replace("Bearer ", "")
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload["sub"]
-
-    # Clear existing sports and save new selections
-    db.query(UserSport).filter(UserSport.user_id == user_id).delete()
+    db.query(UserSport).filter(UserSport.user_id == user.id).delete()
     for sport in body.sports:
-        db.add(UserSport(user_id=user_id, sport=sport))
+        db.add(UserSport(user_id=user.id, sport=sport))
     db.commit()
 
     return {"detail": "Step 2 complete"}
@@ -323,25 +309,12 @@ async def onboarding_step_2(
 @router.post("/onboarding/complete")
 async def onboarding_complete(
     body: OnboardingCompleteRequest,
-    request: Request,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save favorite teams and mark onboarding as complete."""
-    from models.team import UserTeam
-
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.replace("Bearer ", "")
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-    user_id = payload["sub"]
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
     for team_id in body.team_ids:
-        db.add(UserTeam(user_id=user_id, team_id=team_id))
+        db.add(UserTeam(user_id=user.id, team_id=team_id))
 
     user.is_onboarded = True
     db.commit()
@@ -352,24 +325,21 @@ async def onboarding_complete(
 @router.post("/set-password")
 async def set_password(
     body: SetPasswordRequest,
-    request: Request,
-    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
     """Allow Google users to set a password for email login."""
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header.replace("Bearer ", "")
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    from database import SessionLocal
 
-    user = db.query(User).filter(User.id == payload["sub"]).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    user.hashed_password = hash_password(body.password)
-    db.commit()
+    db = SessionLocal()
+    try:
+        db_user = db.query(User).filter(User.id == user.id).first()
+        if db_user:
+            db_user.hashed_password = hash_password(body.password)
+            db.commit()
+    finally:
+        db.close()
 
     return {"detail": "Password set successfully"}

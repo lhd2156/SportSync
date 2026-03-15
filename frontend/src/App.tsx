@@ -35,6 +35,10 @@ import ScoresPage from "./pages/ScoresPage";
 import TeamsPage from "./pages/TeamsPage";
 import GameDetailPage from "./pages/GameDetailPage";
 import SettingsPage from "./pages/SettingsPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
+import CookiePolicyPage from "./pages/CookiePolicyPage";
+import AboutPage from "./pages/AboutPage";
 
 export default function App() {
   return (
@@ -47,10 +51,10 @@ export default function App() {
               <Route path={ROUTES.HOME} element={<LandingPage />} />
               <Route path={ROUTES.LOGIN} element={<LoginPage />} />
               <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
-              <Route path={ROUTES.TERMS} element={<div className="min-h-screen bg-background text-foreground p-8"><h1 className="text-2xl font-bold">Terms of Service</h1></div>} />
-              <Route path={ROUTES.PRIVACY} element={<div className="min-h-screen bg-background text-foreground p-8"><h1 className="text-2xl font-bold">Privacy Policy</h1></div>} />
-              <Route path={ROUTES.COOKIES} element={<div className="min-h-screen bg-background text-foreground p-8"><h1 className="text-2xl font-bold">Cookie Policy</h1></div>} />
-              <Route path={ROUTES.ABOUT} element={<div className="min-h-screen bg-background text-foreground p-8"><h1 className="text-2xl font-bold">About SportSync</h1><p className="text-muted mt-4">v0.1</p></div>} />
+              <Route path={ROUTES.TERMS} element={<TermsPage />} />
+              <Route path={ROUTES.PRIVACY} element={<PrivacyPage />} />
+              <Route path={ROUTES.COOKIES} element={<CookiePolicyPage />} />
+              <Route path={ROUTES.ABOUT} element={<AboutPage />} />
 
               {/* Onboarding -- auth required but not onboarding completion */}
               <Route
