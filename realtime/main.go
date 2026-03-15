@@ -1,17 +1,21 @@
 /*
-SportSync Realtime Service - Entry Point.
+SportSync Realtime Service - Entry Point
 
-Go/Gin WebSocket server that streams live score updates to connected clients.
-Subscribes to Redis pub/sub channel and broadcasts events via WebSocket.
-JWT verification required before accepting any WebSocket connection.
+Starts the Gin HTTP server with the WebSocket endpoint,
+initializes the Hub for managing connections, and starts
+the Redis subscriber for live score updates.
 */
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"sportsync-realtime/handlers"
+	redisclient "sportsync-realtime/redis"
 )
 
 func main() {
@@ -20,15 +24,33 @@ func main() {
 		port = "8080"
 	}
 
-	router := gin.Default()
+	// Initialize WebSocket hub and start event loop
+	hub := handlers.NewHub()
+	go hub.Run()
 
-	// Health check for Docker and load balancer
-	router.GET("/ws/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "healthy", "service": "realtime"})
+	// Initialize Redis client and subscribe to score updates
+	rdb := redisclient.NewRedisClient()
+	ctx := context.Background()
+	go redisclient.SubscribeToScores(ctx, rdb, func(data []byte) {
+		hub.Broadcast(data)
 	})
 
-	log.Printf("SportSync Realtime Service starting on port %s", port)
+	// Set up Gin router
+	router := gin.Default()
+
+	// Health check endpoint for Docker and load balancer
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":      "healthy",
+			"connections": hub.ConnectedCount(),
+		})
+	})
+
+	// WebSocket endpoint for live score streaming
+	router.GET("/ws/scores", handlers.HandleWebSocket(hub))
+
+	log.Printf("Realtime service starting on port %s", port)
 	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start realtime service: %v", err)
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }
