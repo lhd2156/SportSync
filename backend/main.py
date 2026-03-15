@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from constants import APP_TITLE, APP_VERSION, APP_DESCRIPTION
+from routers import auth, user
 
 app = FastAPI(
     title=APP_TITLE,
@@ -24,6 +25,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Mount route handlers
+app.include_router(auth.router)
+app.include_router(user.router)
 
 
 @app.get("/api/health")
