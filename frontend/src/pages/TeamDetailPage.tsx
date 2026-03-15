@@ -167,9 +167,9 @@ export default function TeamDetailPage() {
                 <Line
                   type="monotone"
                   dataKey="score"
-                  stroke="#6c63ff"
+                  stroke="#2E8EFF"
                   strokeWidth={2}
-                  dot={{ fill: "#6c63ff", r: 4 }}
+                  dot={{ fill: "#2E8EFF", r: 4 }}
                   name="Team Score"
                 />
                 <Line
