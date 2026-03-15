@@ -222,7 +222,8 @@ export default function RegisterPage() {
 function Rule({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
     <span className={`transition-colors ${ok ? "text-green-400" : "text-muted/40"}`}>
-      {ok ? "✓" : "○"} {children}
+      <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle ${ok ? "bg-green-400" : "bg-muted/30"}`} />
+      {children}
     </span>
   );
 }

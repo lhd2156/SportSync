@@ -127,6 +127,13 @@ async def register(
         access_token=access_token,
         is_onboarded=False,
         is_new_user=True,
+        user_id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        date_of_birth=str(user.date_of_birth) if user.date_of_birth else None,
+        gender=user.gender,
+        first_name=user.first_name,
+        last_name=user.last_name,
     )
 
 
@@ -175,6 +182,13 @@ async def login(
     return AuthResponse(
         access_token=access_token,
         is_onboarded=user.is_onboarded,
+        user_id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        date_of_birth=str(user.date_of_birth) if user.date_of_birth else None,
+        gender=user.gender,
+        first_name=getattr(user, 'first_name', None),
+        last_name=getattr(user, 'last_name', None),
     )
 
 

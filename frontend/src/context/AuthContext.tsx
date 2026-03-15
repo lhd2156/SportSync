@@ -25,6 +25,22 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** Build a User object from the auth response data */
+function buildUserFromResponse(data: Record<string, unknown>): User {
+  return {
+    id: (data.user_id as string) || "",
+    email: (data.email as string) || "",
+    displayName: (data.display_name as string) || "",
+    dateOfBirth: (data.date_of_birth as string) || "",
+    gender: (data.gender as string) || null,
+    profilePictureUrl: (data.profile_picture_url as string) || null,
+    isOnboarded: !!data.is_onboarded,
+    createdAt: new Date().toISOString(),
+    sports: [],
+    provider: null,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -35,8 +51,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await apiClient.post(API.AUTH_REFRESH);
       setAccessToken(response.data.access_token);
 
-      const profileResponse = await apiClient.get(API.USER_PROFILE);
-      setUser(profileResponse.data);
+      // Try to fetch full profile; fall back to building from refresh response
+      try {
+        const profileResponse = await apiClient.get(API.USER_PROFILE);
+        setUser(profileResponse.data);
+      } catch {
+        setUser(buildUserFromResponse(response.data));
+      }
     } catch {
       /* No valid session, user must log in */
       setAccessToken(null);
@@ -58,9 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
-
-    const profileResponse = await apiClient.get(API.USER_PROFILE);
-    setUser(profileResponse.data);
+    setUser(buildUserFromResponse(response.data));
   }, []);
 
   const register = useCallback(async (
@@ -85,9 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
-
-    const profileResponse = await apiClient.get(API.USER_PROFILE);
-    setUser(profileResponse.data);
+    setUser(buildUserFromResponse(response.data));
   }, []);
 
   const loginWithGoogle = useCallback(async (googleToken: string) => {
@@ -95,10 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       google_token: googleToken,
     });
 
-    setAccessToken(response.data.accessToken);
-
-    const profileResponse = await apiClient.get(API.USER_PROFILE);
-    setUser(profileResponse.data);
+    setAccessToken(response.data.access_token);
+    setUser(buildUserFromResponse(response.data));
   }, []);
 
   const logout = useCallback(async () => {

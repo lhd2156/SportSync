@@ -35,6 +35,15 @@ class AuthResponse(BaseModel):
     access_token: str
     is_onboarded: bool
     is_new_user: bool = False
+    # User profile data — avoids a separate profile fetch
+    user_id: str = ""
+    email: str = ""
+    display_name: Optional[str] = None
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class OnboardingStep1Request(BaseModel):
