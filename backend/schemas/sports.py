@@ -18,6 +18,8 @@ class TeamResponse(BaseModel):
     league: str
     logo_url: Optional[str] = None
     city: Optional[str] = None
+    record: Optional[str] = None
+    color: Optional[str] = None
 
     class Config:
         from_attributes = True

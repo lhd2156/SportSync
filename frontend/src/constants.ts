@@ -13,7 +13,6 @@ export const SUPPORTED_SPORTS = [
   { id: "NBA", label: "NBA", sport: "Basketball" },
   { id: "MLB", label: "MLB", sport: "Baseball" },
   { id: "NHL", label: "NHL", sport: "Hockey" },
-  { id: "MLS", label: "MLS", sport: "Soccer" },
   { id: "EPL", label: "EPL", sport: "Soccer" },
 ] as const;
 
@@ -27,6 +26,7 @@ export const ROUTES = {
   ONBOARDING_STEP_3: "/onboarding/step-3",
   DASHBOARD: "/dashboard",
   SCORES: "/scores",
+  STANDINGS: "/standings",
   TEAMS: "/teams",
   TEAM_DETAIL: "/teams/:id",
   GAME_DETAIL: "/games/:id",
@@ -44,6 +44,7 @@ export const API = {
   AUTH_GOOGLE: "/api/auth/google",
   AUTH_REFRESH: "/api/auth/refresh",
   AUTH_LOGOUT: "/api/auth/logout",
+  AUTH_CHANGE_PASSWORD: "/api/auth/change-password",
   ONBOARDING_STEP_1: "/api/auth/onboarding/step-1",
   ONBOARDING_STEP_2: "/api/auth/onboarding/step-2",
   ONBOARDING_COMPLETE: "/api/auth/onboarding/complete",
@@ -55,11 +56,23 @@ export const API = {
   USER_FEED: "/api/user/feed",
   USER_TEAMS: "/api/user/teams",
   USER_PROFILE: "/api/user/profile",
+  USER_ACCOUNT: "/api/user/account",
   SPORTS_EVENTS_DAY: "/api/sports/events/day",
   SPORTS_EVENTS_PAST: "/api/sports/events/past",
   SPORTS_EVENTS_NEXT: "/api/sports/events/next",
   SPORTS_LEAGUE: "/api/sports/league",
   SPORTS_TEAMS: "/api/sports/teams",
+  SPORTS_NEWS: "/api/sports/news",
+  SPORTS_FEATURED: "/api/sports/featured",
+  /* ESPN API proxy endpoints */
+  ESPN_SCOREBOARD: "/api/sports/espn/scoreboard",
+  ESPN_ALL: "/api/sports/espn/all",
+  ESPN_FEATURED: "/api/sports/espn/featured",
+  ESPN_NEWS: "/api/sports/espn/news",
+  ESPN_ACTIVITY: "/api/sports/espn/activity",
+  ESPN_ACTIVITY_LATEST_DATE: "/api/sports/espn/activity/latest-date",
+  ESPN_HEADSHOT: "/api/sports/espn/headshot",
+  ESPN_GAME: "/api/sports/espn/game",  // + /{eventId}
 } as const;
 
 /* Cookie names must match the backend exactly */

@@ -7,6 +7,8 @@ export interface User {
   id: string;
   email: string;
   displayName: string;
+  firstName: string;
+  lastName: string;
   dateOfBirth: string;
   gender: string | null;
   profilePictureUrl: string | null;
@@ -14,6 +16,7 @@ export interface User {
   createdAt: string;
   sports: string[];
   provider: string | null;
+  hasPassword: boolean;
 }
 
 export interface Team {
@@ -25,6 +28,8 @@ export interface Team {
   league: string;
   logoUrl: string;
   city: string;
+  record?: string | null;
+  color?: string | null;
 }
 
 export interface Game {
