@@ -26,7 +26,7 @@ export default function Footer() {
             <h4 className="text-foreground-base font-medium text-sm mb-3">Navigate</h4>
             <nav className="flex flex-col gap-2">
               <Link to={ROUTES.HOME} className="text-muted text-sm hover:text-accent transition-colors">Home</Link>
-              <Link to={ROUTES.SCORES} className="text-muted text-sm hover:text-accent transition-colors">Scores</Link>
+              <Link to={ROUTES.STANDINGS} className="text-muted text-sm hover:text-accent transition-colors">Standings</Link>
               <Link to={ROUTES.TEAMS} className="text-muted text-sm hover:text-accent transition-colors">Teams</Link>
               <Link to={ROUTES.ABOUT} className="text-muted text-sm hover:text-accent transition-colors">About</Link>
             </nav>

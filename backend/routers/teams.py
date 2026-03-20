@@ -514,6 +514,46 @@ async def list_teams(
     return result
 
 
+@router.get("/slug/{slug}")
+async def get_team_by_slug(slug: str, db: Session = Depends(get_db)):
+    """Single team detail looked up by URL slug (e.g. 'los-angeles-lakers')."""
+    cache_key = f"team:slug:{slug}:detail:v3"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    # Build slug from team name/city and match
+    all_teams = db.query(Team).all()
+    team = None
+    for t in all_teams:
+        candidate_slug = _make_slug(t.name)
+        if candidate_slug == slug:
+            team = t
+            break
+        # Also try city + name combo
+        if t.city:
+            candidate_slug2 = _make_slug(f"{t.city} {t.name}")
+            if candidate_slug2 == slug:
+                team = t
+                break
+
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    # Re-use the existing get_team logic
+    return await get_team(str(team.id), db)
+
+
+def _make_slug(name: str) -> str:
+    """Convert a team name to a URL-friendly slug."""
+    import re
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9\s-]", "", slug)
+    slug = re.sub(r"[\s]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug)
+    return slug.strip("-")
+
+
 @router.get("/{team_id}")
 async def get_team(team_id: str, db: Session = Depends(get_db)):
     """Single team detail with current record, season schedule, and roster."""

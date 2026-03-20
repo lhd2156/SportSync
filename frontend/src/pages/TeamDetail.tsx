@@ -150,16 +150,23 @@ function chartLabelForLeague(league: string) {
 }
 
 export default function TeamDetail() {
-  const { id } = useParams<{ id: string }>();
+  const { id: slug } = useParams<{ id: string }>();
   const [activeTab, setActiveTab] = useState<TeamTab>("overview");
 
   const { data: team, isLoading } = useQuery<TeamDetailData>({
-    queryKey: ["team", id],
+    queryKey: ["team", slug],
     queryFn: async () => {
-      const response = await apiClient.get(`${API.TEAMS}/${id}`);
-      return normalizeTeamDetail(response.data as Record<string, unknown>);
+      // Try slug-based lookup first, fall back to UUID
+      try {
+        const response = await apiClient.get(`${API.TEAMS}/slug/${slug}`);
+        return normalizeTeamDetail(response.data as Record<string, unknown>);
+      } catch {
+        // Fall back to UUID lookup for backward compatibility
+        const response = await apiClient.get(`${API.TEAMS}/${slug}`);
+        return normalizeTeamDetail(response.data as Record<string, unknown>);
+      }
     },
-    enabled: Boolean(id),
+    enabled: Boolean(slug),
     staleTime: 300000,
   });
 
@@ -170,6 +177,8 @@ export default function TeamDetail() {
       return (response.data as Record<string, unknown>[]).map(normalizeTeam);
     },
   });
+
+  const teamId = team?.id;
 
   const schedule = useMemo(() => {
     if (!team) return [];
@@ -266,11 +275,14 @@ export default function TeamDetail() {
       return {
         label: `${stamp.getMonth() + 1}/${stamp.getDate()}`,
         wins: scored > allowed ? 1 : 0,
+        won: scored > allowed,
+        scored,
+        allowed,
       };
     });
   }, [chartGames, team]);
 
-  const isFollowing = savedTeams.some((savedTeam) => savedTeam.id === id);
+  const isFollowing = savedTeams.some((savedTeam) => savedTeam.id === teamId);
   const accent = team?.color?.startsWith("#")
     ? team.color
     : team?.color
@@ -281,8 +293,35 @@ export default function TeamDetail() {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
-        <div className="flex justify-center py-24">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+        <div className="mx-auto max-w-7xl px-4 py-8">
+          {/* Skeleton header */}
+          <div className="overflow-hidden rounded-[2rem] border border-muted/15 bg-surface p-6">
+            <div className="flex items-center gap-5">
+              <div className="h-24 w-24 skeleton-pulse rounded-[1.75rem]" />
+              <div className="space-y-3 flex-1">
+                <div className="flex gap-2">
+                  <div className="h-6 w-14 skeleton-pulse rounded-full" />
+                  <div className="h-6 w-20 skeleton-pulse rounded-full" />
+                </div>
+                <div className="h-7 w-48 skeleton-pulse" />
+                <div className="h-4 w-24 skeleton-pulse" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-8">
+              {[1,2,3,4].map(i => <div key={i} className="h-9 w-24 skeleton-pulse rounded-full" />)}
+            </div>
+          </div>
+          {/* Skeleton content */}
+          <div className="mt-8 grid gap-6 xl:grid-cols-2">
+            {[1,2].map(i => (
+              <div key={i} className="rounded-[2rem] border border-muted/15 bg-surface p-6">
+                <div className="h-5 w-32 skeleton-pulse mb-4" />
+                <div className="space-y-3">
+                  {[1,2,3].map(j => <div key={j} className="h-20 skeleton-pulse rounded-xl" />)}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -359,6 +398,8 @@ export default function TeamDetail() {
             </div>
           </div>
         </section>
+
+        <div key={activeTab} className="tab-content-enter">
 
         {activeTab === "overview" ? (
           <section className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
@@ -513,47 +554,51 @@ export default function TeamDetail() {
                 Roster data is not available yet.
               </div>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {team.roster.map((player) => (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {team.roster.map((player, i) => (
                   <div
                     key={player.id || player.name}
-                    className="rounded-3xl border border-muted/15 bg-background/60 p-4"
+                    className="rounded-3xl border border-muted/15 bg-background/60 overflow-hidden box-row-enter"
+                    style={{ animationDelay: `${i * 40}ms` }}
                   >
-                    <div className="flex items-start gap-4">
+                    {/* Large headshot on top */}
+                    <div className="relative w-full h-36 bg-gradient-to-b from-accent/8 to-transparent flex items-center justify-center">
                       <SafeAvatar
                         src={player.headshot}
                         alt={player.name}
-                        className="flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/15 bg-surface"
-                        imgClassName="h-16 w-16 rounded-2xl object-cover"
-                        loadingContent={<div className="h-16 w-16 animate-pulse rounded-2xl bg-accent/10" />}
+                        className="flex h-28 w-28 items-center justify-center rounded-full border-2 border-accent/20 bg-surface shadow-lg"
+                        imgClassName="h-28 w-28 rounded-full object-cover img-fade-in"
+                        loadingContent={<div className="h-28 w-28 animate-pulse rounded-full bg-accent/10" />}
                         fallback={
-                          <span className="text-base font-semibold tracking-[0.18em] text-accent/70">
+                          <span className="text-2xl font-semibold tracking-[0.18em] text-accent/70">
                             {(player.shortName || player.name).slice(0, 2).toUpperCase()}
                           </span>
                         }
                       />
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h3 className="truncate text-lg font-semibold text-foreground">{player.name}</h3>
-                          {player.jersey ? (
-                            <span className="rounded-full border border-muted/15 px-2 py-0.5 text-[11px] font-semibold text-muted">
-                              #{player.jersey}
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-1 text-sm text-muted">
-                          {[player.position, player.status].filter(Boolean).join(" • ") || "Active roster"}
-                        </p>
-                      </div>
                     </div>
 
+                    {/* Name + position */}
+                    <div className="px-4 pt-3 pb-2 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <h3 className="truncate text-base font-semibold text-foreground">{player.name}</h3>
+                        {player.jersey ? (
+                          <span className="rounded-full border border-muted/15 px-2 py-0.5 text-[11px] font-semibold text-muted">
+                            #{player.jersey}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-sm text-muted">
+                        {[player.position, player.status].filter(Boolean).join(" • ") || "Active roster"}
+                      </p>
+                    </div>
+
+                    {/* Stats facts */}
                     {player.facts.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
+                      <div className="px-4 pb-4 pt-1 flex flex-wrap justify-center gap-1.5">
                         {player.facts.map((fact) => (
                           <span
                             key={`${player.id}-${fact.label}`}
-                            className="rounded-full border border-accent/15 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-accent"
+                            className="rounded-full border border-accent/15 bg-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-accent"
                           >
                             {fact.label} {fact.value}
                           </span>
@@ -590,18 +635,60 @@ export default function TeamDetail() {
               series={[{ dataKey: "value", color: accent, name: "Average" }]}
             />
 
-            <div className="xl:col-span-2">
-              <StatChart
-                title="Win/Loss Trend"
-                subtitle="1 means a win, 0 means a loss"
-                type="bar"
-                data={winTrend}
-                xKey="label"
-                series={[{ dataKey: "wins", color: accent, name: "Wins" }]}
-              />
+            {/* Win/Loss Streak — custom visual instead of chart */}
+            <div className="xl:col-span-2 rounded-3xl border border-muted/15 bg-surface p-5">
+              <h3 className="text-base font-semibold text-foreground">Win/Loss Streak</h3>
+              <p className="mt-1 text-sm text-muted mb-5">
+                Last {winTrend.length} completed games — {winTrend.filter(g => g.won).length}W {winTrend.filter(g => !g.won).length}L
+              </p>
+
+              {winTrend.length === 0 ? (
+                <p className="text-sm text-muted text-center py-6">No completed games yet.</p>
+              ) : (
+                <>
+                  {/* Streak circles */}
+                  <div className="flex items-center gap-2 flex-wrap justify-center">
+                    {winTrend.map((g, i) => (
+                      <div key={i} className="flex flex-col items-center gap-1 box-row-enter" style={{ animationDelay: `${i * 60}ms` }}>
+                        <div
+                          className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
+                            g.won
+                              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-400"
+                              : "bg-red-500/20 border-red-500/50 text-red-400"
+                          }`}
+                        >
+                          {g.won ? "W" : "L"}
+                        </div>
+                        <span className="text-[10px] text-muted">{g.label}</span>
+                        <span className="text-[10px] text-muted/60">{g.scored}-{g.allowed}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Streak bar */}
+                  <div className="mt-5 h-2 rounded-full overflow-hidden bg-muted/10 flex">
+                    {winTrend.map((g, i) => (
+                      <div
+                        key={i}
+                        className="h-full transition-all duration-300"
+                        style={{
+                          width: `${100 / winTrend.length}%`,
+                          backgroundColor: g.won ? "#10b981" : "#ef4444",
+                          opacity: 0.7 + (i / winTrend.length) * 0.3,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <div className="mt-2 flex justify-between text-[10px] text-muted">
+                    <span>Oldest</span>
+                    <span>Most Recent</span>
+                  </div>
+                </>
+              )}
             </div>
           </section>
         ) : null}
+        </div>
       </main>
 
       <Footer />

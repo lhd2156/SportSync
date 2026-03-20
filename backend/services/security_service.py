@@ -5,13 +5,18 @@ Rate limiting, IP-based request throttling, and security utilities.
 All rate limits enforced via Redis counters with sliding windows.
 Falls back gracefully if Redis is unavailable (local dev without Docker).
 """
+import hashlib
+
 from fastapi import Request, HTTPException, status
 
 from constants import (
     RATE_LIMIT_LOGIN_MAX,
     RATE_LIMIT_LOGIN_WINDOW,
+    RATE_LIMIT_PASSWORD_RESET_MAX,
+    RATE_LIMIT_PASSWORD_RESET_WINDOW,
     RATE_LIMIT_REGISTER_MAX,
     RATE_LIMIT_REGISTER_WINDOW,
+    REDIS_PREFIX_PASSWORD_RESET,
     REDIS_PREFIX_RATE_LIMIT,
 )
 from services.cache_service import redis_client
@@ -48,6 +53,46 @@ def check_rate_limit(request: Request, action: str) -> None:
     try:
         current = redis_client.get(key)
 
+        if current and int(current) >= max_attempts:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many attempts. Please try again later.",
+            )
+
+        pipe = redis_client.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, window)
+        pipe.execute()
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+
+def check_subject_rate_limit(action: str, subject: str) -> None:
+    """
+    Enforce subject-based limits, such as password reset requests per email.
+    Subject values are hashed before storing in Redis.
+    """
+    if not redis_client or not subject:
+        return
+
+    normalized_subject = subject.strip().lower()
+    if not normalized_subject:
+        return
+
+    if action == "password_reset":
+        max_attempts = RATE_LIMIT_PASSWORD_RESET_MAX
+        window = RATE_LIMIT_PASSWORD_RESET_WINDOW
+        prefix = REDIS_PREFIX_PASSWORD_RESET
+    else:
+        return
+
+    subject_hash = hashlib.sha256(normalized_subject.encode("utf-8")).hexdigest()
+    key = f"{prefix}{action}:{subject_hash}"
+
+    try:
+        current = redis_client.get(key)
         if current and int(current) >= max_attempts:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,

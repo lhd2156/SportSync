@@ -6,6 +6,7 @@ verification, session management, and all auth business logic.
 Routers call this service; it never imports from routers.
 """
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -35,17 +36,20 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_access_token(user_id: str, expires_minutes: int | None = None) -> str:
+def create_access_token(user_id: str, expires_days: int | None = None) -> str:
     """
-    Create a short-lived JWT access token (default 15 minutes).
+    Create a JWT access token (default 7 days).
     Signed with HS256. Stored in memory on the client, never in localStorage.
     """
-    expire = datetime.now(timezone.utc) + timedelta(
-        minutes=expires_minutes or settings.jwt_access_expire_minutes
+    issued_at = datetime.now(timezone.utc)
+    expire = issued_at + timedelta(
+        days=expires_days if expires_days is not None else settings.jwt_access_expire_days
     )
     payload = {
         "sub": str(user_id),
+        "iat": issued_at,
         "exp": expire,
+        "jti": str(uuid.uuid4()),
         "type": "access",
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
@@ -57,12 +61,16 @@ def create_refresh_token(user_id: str, remember_me: bool = False) -> tuple[str, 
     Returns (token, max_age_seconds) for cookie setting.
     """
     days = settings.jwt_remember_me_expire_days if remember_me else settings.jwt_refresh_expire_days
-    expire = datetime.now(timezone.utc) + timedelta(days=days)
+    issued_at = datetime.now(timezone.utc)
+    expire = issued_at + timedelta(days=days)
     max_age = days * 86400
 
     payload = {
         "sub": str(user_id),
+        "iat": issued_at,
         "exp": expire,
+        "jti": str(uuid.uuid4()),
+        "remember_me": remember_me,
         "type": "refresh",
     }
     token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)

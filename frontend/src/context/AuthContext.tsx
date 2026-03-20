@@ -25,19 +25,48 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function readString(data: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function readNullableString(data: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+function readBool(data: Record<string, unknown>, ...keys: string[]): boolean {
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "boolean") return value;
+  }
+  return false;
+}
+
 /** Build a User object from the auth response data */
 function buildUserFromResponse(data: Record<string, unknown>): User {
+  const createdAt = readString(data, "created_at", "createdAt") || new Date().toISOString();
+  const sportsValue = data.sports;
   return {
-    id: (data.user_id as string) || "",
-    email: (data.email as string) || "",
-    displayName: (data.display_name as string) || "",
-    dateOfBirth: (data.date_of_birth as string) || "",
-    gender: (data.gender as string) || null,
-    profilePictureUrl: (data.profile_picture_url as string) || null,
-    isOnboarded: !!data.is_onboarded,
-    createdAt: new Date().toISOString(),
-    sports: [],
-    provider: null,
+    id: readString(data, "user_id", "id"),
+    email: readString(data, "email"),
+    displayName: readString(data, "display_name", "displayName"),
+    firstName: readString(data, "first_name", "firstName"),
+    lastName: readString(data, "last_name", "lastName"),
+    dateOfBirth: readString(data, "date_of_birth", "dateOfBirth"),
+    gender: readNullableString(data, "gender"),
+    profilePictureUrl: readNullableString(data, "profile_picture_url", "profilePictureUrl"),
+    isOnboarded: readBool(data, "is_onboarded", "isOnboarded"),
+    createdAt,
+    sports: Array.isArray(sportsValue) ? sportsValue.filter((sport): sport is string => typeof sport === "string") : [],
+    provider: readNullableString(data, "provider"),
+    hasPassword: readBool(data, "has_password", "hasPassword"),
   };
 }
 
@@ -54,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Try to fetch full profile; fall back to building from refresh response
       try {
         const profileResponse = await apiClient.get(API.USER_PROFILE);
-        setUser(profileResponse.data);
+        setUser(buildUserFromResponse(profileResponse.data));
       } catch {
         setUser(buildUserFromResponse(response.data));
       }

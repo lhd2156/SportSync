@@ -15,7 +15,6 @@ const LEAGUE_IDS: { key: string; dbId: number; fallbackLabel: string; sport: str
   { key: "NBA", dbId: 4387, fallbackLabel: "NBA", sport: "Basketball" },
   { key: "MLB", dbId: 4424, fallbackLabel: "MLB", sport: "Baseball" },
   { key: "NHL", dbId: 4380, fallbackLabel: "NHL", sport: "Hockey" },
-  { key: "MLS", dbId: 4346, fallbackLabel: "MLS", sport: "Soccer" },
   { key: "EPL", dbId: 4328, fallbackLabel: "Premier League", sport: "Soccer" },
 ];
 
@@ -157,13 +156,6 @@ export default function OnboardingStep2() {
                   <span className="text-base font-bold block text-foreground">{league.id}</span>
                   <span className="text-xs text-muted">{league.sport}</span>
                 </div>
-                {isSelected && (
-                  <div className="w-5 h-5 rounded-full bg-accent flex items-center justify-center">
-                    <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                )}
               </button>
             );
           })}

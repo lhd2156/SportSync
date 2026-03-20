@@ -26,7 +26,7 @@ export default function AboutPage() {
         <div className="space-y-8 text-sm leading-relaxed">
           <section className="bg-surface border border-muted/20 rounded-xl p-6">
             <h2 className="text-lg font-semibold text-foreground mb-3">What is SportSync?</h2>
-            <p>SportSync is a real-time multi-sport platform that brings live scores, game schedules, team data, and machine learning predictions together in one personalized experience. Follow the teams you love across NFL, NBA, MLB, NHL, MLS, and EPL.</p>
+            <p>SportSync is a real-time multi-sport platform that brings live scores, game schedules, team data, and machine learning predictions together in one personalized experience. Follow the teams you love across NFL, NBA, MLB, NHL, and EPL.</p>
           </section>
 
           <section className="bg-surface border border-muted/20 rounded-xl p-6">
@@ -50,7 +50,7 @@ export default function AboutPage() {
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-accent mt-0.5 font-bold">--</span>
-                <span><strong>6 Sports Supported:</strong> NFL, NBA, MLB, NHL, MLS, and English Premier League</span>
+                <span><strong>5 Sports Supported:</strong> NFL, NBA, MLB, NHL, and English Premier League</span>
               </li>
             </ul>
           </section>

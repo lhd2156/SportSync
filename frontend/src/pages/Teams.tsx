@@ -8,6 +8,22 @@ import TeamCard from "../components/TeamCard";
 import { API, SUPPORTED_SPORTS } from "../constants";
 import type { Team } from "../types";
 
+const LEAGUE_LOGOS: Record<string, string> = {
+  NFL: "https://a.espncdn.com/i/teamlogos/leagues/500/nfl.png",
+  NBA: "https://a.espncdn.com/i/teamlogos/leagues/500/nba.png",
+  MLB: "https://a.espncdn.com/i/teamlogos/leagues/500/mlb.png",
+  NHL: "https://a.espncdn.com/i/teamlogos/leagues/500/nhl.png",
+  EPL: "https://a.espncdn.com/i/leaguelogos/soccer/500/23.png",
+};
+
+const LEAGUE_ORDER: Record<string, number> = {
+  NFL: 0, nfl: 0, Football: 0,
+  NBA: 1, nba: 1, Basketball: 1,
+  MLB: 2, mlb: 2, Baseball: 2,
+  NHL: 3, nhl: 3, Hockey: 3,
+  EPL: 4, epl: 4, "English Premier League": 4, Soccer: 4,
+};
+
 function normalizeTeam(raw: Record<string, unknown>): Team {
   return {
     id: String(raw.id ?? ""),
@@ -55,7 +71,7 @@ export default function Teams() {
   const filteredTeams = useMemo(() => {
     const term = deferredSearch.trim().toLowerCase();
 
-    return teams.filter((team) => {
+    const filtered = teams.filter((team) => {
       const leagueMatch = activeLeague === "ALL" || team.league === activeLeague;
       if (!leagueMatch) {
         return false;
@@ -67,6 +83,18 @@ export default function Teams() {
         .filter(Boolean)
         .some((value) => value.toLowerCase().includes(term));
     });
+
+    // Sort by league priority: NFL → NBA → MLB → NHL → EPL
+    if (activeLeague === "ALL") {
+      filtered.sort((a, b) => {
+        const pa = LEAGUE_ORDER[a.league] ?? LEAGUE_ORDER[a.sport] ?? 99;
+        const pb = LEAGUE_ORDER[b.league] ?? LEAGUE_ORDER[b.sport] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    return filtered;
   }, [activeLeague, deferredSearch, teams]);
 
   return (
@@ -124,7 +152,12 @@ export default function Teams() {
                     : "border border-muted/15 text-muted hover:border-accent/30 hover:text-foreground"
                 }`}
               >
+              <span className="inline-flex items-center gap-1.5">
+                {LEAGUE_LOGOS[sport.id] && (
+                  <img src={LEAGUE_LOGOS[sport.id]} alt={sport.label} className="h-4 w-4 object-contain" />
+                )}
                 {sport.label}
+              </span>
               </button>
             ))}
           </div>

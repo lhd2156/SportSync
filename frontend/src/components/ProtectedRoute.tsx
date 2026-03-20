@@ -6,7 +6,7 @@
  * - JWT but not onboarded: redirects to /onboarding/step-1
  * - JWT and onboarded: renders children
  */
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 
@@ -20,6 +20,7 @@ export default function ProtectedRoute({
   requireOnboarding = true,
 }: ProtectedRouteProps) {
   const { user, isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   /* Show nothing while checking auth state on first load */
   if (isLoading) {
@@ -32,7 +33,13 @@ export default function ProtectedRoute({
 
   /* User not logged in at all */
   if (!isAuthenticated || !user) {
-    return <Navigate to={ROUTES.LOGIN} replace />;
+    const requestedPath = `${location.pathname}${location.search}${location.hash}`;
+    return (
+      <Navigate
+        to={`${ROUTES.LOGIN}?redirect=${encodeURIComponent(requestedPath)}`}
+        replace
+      />
+    );
   }
 
   /* User is logged in but has not completed onboarding */

@@ -5,16 +5,18 @@
  * Footer and legal text below the fold.
  */
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 import Logo from "../components/Logo";
 import Footer from "../components/Footer";
 import GoogleSignInButton from "../components/GoogleSignInButton";
+import { getSafeRedirectTarget } from "../utils/redirect";
 
 export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,7 +30,11 @@ export default function LoginPage() {
     setIsSubmitting(true);
     try {
       await login(email, password, rememberMe);
-      navigate(ROUTES.DASHBOARD);
+      const redirectTarget = getSafeRedirectTarget(
+        searchParams.get("redirect"),
+        ROUTES.DASHBOARD,
+      );
+      navigate(redirectTarget);
     } catch (err: unknown) {
       const apiError = err as { response?: { data?: { detail?: string } } };
       setError(apiError.response?.data?.detail || "Login failed. Please try again.");
@@ -98,7 +104,6 @@ export default function LoginPage() {
                   />
                   <span className="text-sm text-foreground-base select-none">Remember me</span>
                 </label>
-                <span className="text-xs text-muted/60">30 days</span>
               </div>
 
               {/* Submit */}

@@ -4,7 +4,7 @@
  * Sets up providers (Auth, Cookies, React Query) and the router.
  * All routes defined here with appropriate guards.
  */
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./context/AuthContext";
 import { CookieProvider } from "./context/CookieContext";
@@ -31,10 +31,10 @@ import OnboardingStep1 from "./pages/OnboardingStep1";
 import OnboardingStep2 from "./pages/OnboardingStep2";
 import OnboardingStep3 from "./pages/OnboardingStep3";
 import DashboardPage from "./pages/DashboardPage";
-import ScoresPage from "./pages/ScoresPage";
 import Teams from "./pages/Teams";
 import GameDetailPage from "./pages/GameDetailPage";
 import TeamDetail from "./pages/TeamDetail";
+import StandingsPage from "./pages/StandingsPage";
 import SettingsPage from "./pages/SettingsPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
@@ -73,8 +73,8 @@ export default function App() {
 
               {/* Protected -- auth + onboarding required */}
               <Route path={ROUTES.DASHBOARD} element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-              <Route path={ROUTES.SCORES} element={<ProtectedRoute><ScoresPage /></ProtectedRoute>} />
-              <Route path={ROUTES.STANDINGS} element={<ProtectedRoute><ScoresPage /></ProtectedRoute>} />
+              <Route path={ROUTES.SCORES} element={<Navigate to={ROUTES.DASHBOARD} replace />} />
+              <Route path={ROUTES.STANDINGS} element={<ProtectedRoute><StandingsPage /></ProtectedRoute>} />
               <Route path={ROUTES.TEAMS} element={<ProtectedRoute><Teams /></ProtectedRoute>} />
               <Route path={ROUTES.TEAM_DETAIL} element={<ProtectedRoute><TeamDetail /></ProtectedRoute>} />
               <Route path={ROUTES.GAME_DETAIL} element={<ProtectedRoute><GameDetailPage /></ProtectedRoute>} />

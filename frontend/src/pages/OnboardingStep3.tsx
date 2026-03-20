@@ -1,121 +1,444 @@
 /**
  * SportSync - Onboarding Step 3: Pick Your Teams
  *
- * Fetches real teams from TheSportsDB free API based on sports
- * selected in Step 2. User can filter by league tab.
- * Skip is allowed — user doesn't have to pick any teams.
+ * Uses backend APIs for team data and live standings groups so filtering stays
+ * aligned with current league structure without hardcoded team maps.
  */
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
 import apiClient from "../api/client";
 import { API, ROUTES } from "../constants";
+import { useAuth } from "../context/AuthContext";
 
-/* ─── League → TheSportsDB league name mapping ─── */
-const LEAGUE_API_MAP: Record<string, string> = {
-  NFL: "NFL",
-  NBA: "NBA",
-  MLB: "MLB",
-  NHL: "NHL",
-  MLS: "MLS",
-  EPL: "English Premier League",
-};
-
-interface SportsDBTeam {
-  idTeam: string;
-  strTeam: string;
-  strTeamShort: string;
-  strLeague: string;
-  strBadge: string;
-  strStadium: string;
-}
+const LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
+type LeagueKey = (typeof LEAGUE_ORDER)[number];
 
 interface TeamItem {
   id: string;
   name: string;
   shortName: string;
-  league: string;
+  league: LeagueKey;
   logo: string;
+}
+
+interface TeamGroup {
+  name: string;
+  teams: string[];
+  teamIds: string[];
+}
+
+interface TeamGroupsResponse {
+  groups?: TeamGroup[];
+}
+
+interface TeamFilterPanelProps {
+  title: string;
+  groups: TeamGroup[];
+  selectedGroups: string[];
+  emptyStateText?: string;
+  isLoading: boolean;
+  layout?: "stack" | "grid";
+  onClearAll: () => void;
+  onToggleGroup: (groupName: string) => void;
+}
+
+function SearchIcon() {
+  return (
+    <svg
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 5h18" />
+      <path d="M7 12h10" />
+      <path d="M10 19h4" />
+    </svg>
+  );
+}
+
+function normalizeTeamName(value: string) {
+  return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+}
+
+function getFilterTitle(league: LeagueKey | null) {
+  if (league === null) {
+    return "League";
+  }
+
+  if (league === "NBA") {
+    return "Conference";
+  }
+
+  if (league === "EPL") {
+    return "Table";
+  }
+
+  if (league) {
+    return "Division";
+  }
+
+  return "Filter";
+}
+
+function TeamFilterPanel({
+  title,
+  groups,
+  selectedGroups,
+  emptyStateText,
+  isLoading,
+  layout = "stack",
+  onClearAll,
+  onToggleGroup,
+}: TeamFilterPanelProps) {
+  const canClear = selectedGroups.length > 0;
+
+  return (
+    <div className="rounded-2xl border border-muted/15 bg-surface/85 p-4">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.24em] text-muted/65">
+            <FilterIcon />
+            Filter
+          </div>
+          <h3 className="mt-2 text-sm font-semibold text-foreground">{title}</h3>
+        </div>
+
+        <button
+          type="button"
+          onClick={onClearAll}
+          disabled={!canClear}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
+            canClear
+              ? "bg-accent text-white hover:bg-accent-hover"
+              : "bg-accent text-white opacity-55"
+          }`}
+        >
+          Clear all
+        </button>
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((item) => (
+            <div
+              key={item}
+              className="h-10 rounded-xl border border-muted/10 bg-background/40 animate-pulse"
+            />
+          ))}
+        </div>
+      ) : groups.length > 0 ? (
+        <div
+          className={
+            layout === "grid"
+              ? "grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-4"
+              : "flex flex-col gap-2"
+          }
+        >
+          {groups.map((group) => {
+            const isActive = selectedGroups.includes(group.name);
+
+            return (
+              <button
+                key={group.name}
+                type="button"
+                onClick={() => onToggleGroup(group.name)}
+                className={`rounded-xl border px-3 py-2 text-left text-sm transition-all ${
+                  isActive
+                    ? "border-accent bg-accent text-white shadow-[0_0_0_1px_rgba(46,142,255,0.16)]"
+                    : "border-muted/15 bg-background/40 text-muted hover:border-muted/30 hover:text-foreground"
+                }`}
+              >
+                {group.name}
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        emptyStateText ? <p className="text-xs leading-6 text-muted">{emptyStateText}</p> : null
+      )}
+    </div>
+  );
 }
 
 export default function OnboardingStep3() {
   const { user, setUser } = useAuth();
   const navigate = useNavigate();
+
   const [teams, setTeams] = useState<TeamItem[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<string[]>([]);
+  const [groupsByLeague, setGroupsByLeague] = useState<Partial<Record<LeagueKey, TeamGroup[]>>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeLeague, setActiveLeague] = useState<string | null>(null);
+  const [teamsError, setTeamsError] = useState("");
+  const [activeLeague, setActiveLeague] = useState<LeagueKey | null>("NFL");
+  const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
+  const [groupLoadingLeague, setGroupLoadingLeague] = useState<LeagueKey | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Fetch teams from TheSportsDB on mount
-  useEffect(() => {
-    async function fetchTeams() {
-      setIsLoading(true);
-      const allTeams: TeamItem[] = [];
+  const fetchTeams = useCallback(async () => {
+    setIsLoading(true);
+    setTeamsError("");
 
-      const leagueKeys = Object.keys(LEAGUE_API_MAP);
-      const fetches = leagueKeys.map(async (key) => {
-        try {
-          const leagueName = LEAGUE_API_MAP[key];
-          const resp = await fetch(
-            `https://www.thesportsdb.com/api/v1/json/3/search_all_teams.php?l=${encodeURIComponent(leagueName)}`
-          );
-          const data = await resp.json();
-          if (data.teams) {
-            const mapped: TeamItem[] = data.teams.map((t: SportsDBTeam) => ({
-              id: t.idTeam,
-              name: t.strTeam,
-              shortName: t.strTeamShort || t.strTeam.slice(0, 3).toUpperCase(),
-              league: key,
-              logo: t.strBadge ? `${t.strBadge}/tiny` : "",
-            }));
-            allTeams.push(...mapped);
-          }
-        } catch {
-          // Silently skip failed league fetches
-        }
+    try {
+      // Use /api/teams which returns internal DB IDs that work with onboarding save
+      const response = await apiClient.get("/api/teams", {
+        params: { page: 1, page_size: 500 },
       });
 
-      await Promise.all(fetches);
+      const allTeams: TeamItem[] = (response.data || []).map((team: any) => ({
+        id: team.id,
+        name: team.name,
+        shortName: team.short_name || team.name.slice(0, 3).toUpperCase(),
+        league: team.league as LeagueKey,
+        logo: team.logo_url || "",
+      }));
+
+      // Sort by league order then name
+      allTeams.sort((left, right) => {
+        const leftIndex = LEAGUE_ORDER.indexOf(left.league);
+        const rightIndex = LEAGUE_ORDER.indexOf(right.league);
+        if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+        return left.name.localeCompare(right.name);
+      });
+
       setTeams(allTeams);
+      setTeamsError(
+        allTeams.length === 0
+          ? "Teams are temporarily unavailable. Retry once the backend is back up."
+          : ""
+      );
+    } catch {
+      setTeamsError("Failed to load teams. Please try again.");
+    } finally {
       setIsLoading(false);
     }
-
-    fetchTeams();
   }, []);
 
+  useEffect(() => {
+    fetchTeams();
+  }, [fetchTeams]);
+
+  useEffect(() => {
+    function handleWindowFocus() {
+      if (teams.length === 0) {
+        fetchTeams();
+      }
+    }
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => window.removeEventListener("focus", handleWindowFocus);
+  }, [fetchTeams, teams.length]);
+
   const leagues = useMemo(() => {
-    const unique = [...new Set(teams.map((t) => t.league))];
-    return unique;
+    const loadedLeagues = new Set(teams.map((team) => team.league));
+    return LEAGUE_ORDER.filter((league) => loadedLeagues.has(league));
   }, [teams]);
 
+  useEffect(() => {
+    if (activeLeague && !leagues.includes(activeLeague)) {
+      setActiveLeague(leagues[0] ?? null);
+    }
+  }, [activeLeague, leagues]);
+
+  useEffect(() => {
+    setSelectedGroupNames([]);
+
+    if (!activeLeague || groupsByLeague[activeLeague] !== undefined) {
+      return;
+    }
+
+    let isCancelled = false;
+    const leagueKey = activeLeague;
+
+    async function fetchGroups() {
+      setGroupLoadingLeague(leagueKey);
+
+      try {
+        const response = await apiClient.get<TeamGroupsResponse>("/api/sports/team-groups", {
+          params: { league: leagueKey },
+        });
+
+        if (!isCancelled) {
+          setGroupsByLeague((previous) => ({
+            ...previous,
+            [leagueKey]: response.data.groups || [],
+          }));
+        }
+      } catch {
+        if (!isCancelled) {
+          setGroupsByLeague((previous) => ({
+            ...previous,
+            [leagueKey]: [],
+          }));
+        }
+      } finally {
+        if (!isCancelled) {
+          setGroupLoadingLeague((current) => (current === leagueKey ? null : current));
+        }
+      }
+    }
+
+    fetchGroups();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activeLeague, groupsByLeague]);
+
+  const activeGroups = useMemo(() => {
+    if (!activeLeague) {
+      return [];
+    }
+
+    return groupsByLeague[activeLeague] ?? [];
+  }, [activeLeague, groupsByLeague]);
+
+  const isGroupsLoading = activeLeague !== null && groupLoadingLeague === activeLeague;
+  const isLeagueFilterMode = activeLeague === null;
+  const panelGroups = useMemo(
+    () =>
+      isLeagueFilterMode
+        ? leagues.map((league) => ({
+            name: league,
+            teams: [],
+            teamIds: [],
+          }))
+        : activeGroups,
+    [activeGroups, isLeagueFilterMode, leagues]
+  );
+
   const visibleTeams = useMemo(() => {
-    if (!activeLeague) return teams;
-    return teams.filter((t) => t.league === activeLeague);
-  }, [activeLeague, teams]);
+    let filtered = activeLeague ? teams.filter((team) => team.league === activeLeague) : teams;
+
+    if (activeLeague && selectedGroupNames.length > 0) {
+      const allowedIds = new Set<string>();
+      const allowedNames = new Set<string>();
+
+      activeGroups
+        .filter((item) => selectedGroupNames.includes(item.name))
+        .forEach((group) => {
+          group.teamIds.forEach((teamId) => allowedIds.add(teamId));
+          group.teams.forEach((teamName) => allowedNames.add(normalizeTeamName(teamName)));
+        });
+
+      filtered = filtered.filter(
+        (team) => allowedIds.has(team.id) || allowedNames.has(normalizeTeamName(team.name))
+      );
+    }
+
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(
+        (team) =>
+          team.name.toLowerCase().includes(query) ||
+          team.shortName.toLowerCase().includes(query)
+      );
+    }
+
+    return filtered;
+  }, [activeGroups, activeLeague, searchQuery, selectedGroupNames, teams]);
+
+  const filterTitle = getFilterTitle(activeLeague);
+  const filterEmptyStateText =
+    activeLeague === null ? "" : "No additional filters for this league.";
+
+  function handleFilterToggle(groupName: string) {
+    if (isLeagueFilterMode) {
+      if (LEAGUE_ORDER.includes(groupName as LeagueKey)) {
+        setActiveLeague(groupName as LeagueKey);
+      }
+      setSelectedGroupNames([]);
+      return;
+    }
+
+    setSelectedGroupNames((previous) =>
+      previous.includes(groupName)
+        ? previous.filter((name) => name !== groupName)
+        : [...previous, groupName]
+    );
+  }
+
+  function handleFilterClearAll() {
+    if (isLeagueFilterMode) {
+      setActiveLeague(null);
+      return;
+    }
+
+    setSelectedGroupNames([]);
+  }
 
   function toggleTeam(teamId: string) {
-    setSelectedTeams((prev) =>
-      prev.includes(teamId) ? prev.filter((t) => t !== teamId) : [...prev, teamId]
+    setSelectedTeams((previous) =>
+      previous.includes(teamId)
+        ? previous.filter((id) => id !== teamId)
+        : [...previous, teamId]
     );
   }
 
   async function handleComplete() {
     setIsSubmitting(true);
+
     try {
       await apiClient.post(API.ONBOARDING_COMPLETE, {
         team_ids: selectedTeams,
       });
 
+      const teamNames = teams
+        .filter((team) => selectedTeams.includes(team.id))
+        .map((team) => team.name);
+
+      if (teamNames.length > 0) {
+        localStorage.setItem("sportsync_saved_teams", JSON.stringify(teamNames));
+      }
+
       if (user) {
         setUser({ ...user, isOnboarded: true });
       }
+
       navigate(ROUTES.DASHBOARD);
     } catch {
-      // Still navigate — onboarding shouldn't block the user
       if (user) {
         setUser({ ...user, isOnboarded: true });
       }
+
       navigate(ROUTES.DASHBOARD);
     } finally {
       setIsSubmitting(false);
@@ -124,45 +447,47 @@ export default function OnboardingStep3() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="w-10 h-10 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted text-sm">Loading teams...</p>
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          <p className="text-sm text-muted">Loading teams...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4 py-12 animate-fadeIn">
-      <div className="w-full max-w-2xl">
+    <div className="min-h-screen bg-background px-4 py-6 md:py-8 animate-fadeIn">
+      <div className="mx-auto w-full max-w-[1460px]">
         <OnboardingProgress currentStep={3} />
 
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-foreground mb-2">Pick Your Teams</h1>
-          <p className="text-muted text-sm">Your saved teams always appear first in the feed</p>
+        <div className="mx-auto mb-7 w-full max-w-[920px] text-center">
+          <h1 className="mb-2 text-2xl font-bold text-foreground">Pick Your Teams</h1>
+          <p className="text-sm text-muted">Your saved teams always appear first in the feed</p>
         </div>
 
-        {/* League filter tabs */}
-        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 justify-center flex-wrap">
+        <div className="mx-auto mb-5 flex w-full max-w-[920px] flex-wrap justify-center gap-2 overflow-x-auto pb-2">
           <button
+            type="button"
             onClick={() => setActiveLeague(null)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition-all whitespace-nowrap ${
               activeLeague === null
-                ? "bg-accent text-white"
-                : "bg-surface border border-muted/20 text-muted hover:text-foreground"
+                ? "border-accent bg-accent text-white"
+                : "border-muted/15 bg-surface/70 text-muted hover:border-muted/30 hover:text-foreground"
             }`}
           >
             All
           </button>
+
           {leagues.map((league) => (
             <button
               key={league}
+              type="button"
               onClick={() => setActiveLeague(league)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all whitespace-nowrap ${
+              className={`rounded-full border px-4 py-2 text-sm font-medium transition-all whitespace-nowrap ${
                 activeLeague === league
-                  ? "bg-accent text-white"
-                  : "bg-surface border border-muted/20 text-muted hover:text-foreground"
+                  ? "border-accent bg-accent text-white"
+                  : "border-muted/15 bg-surface/70 text-muted hover:border-muted/30 hover:text-foreground"
               }`}
             >
               {league}
@@ -170,66 +495,152 @@ export default function OnboardingStep3() {
           ))}
         </div>
 
-        {/* Team grid */}
-        {visibleTeams.length === 0 ? (
-          <div className="text-center text-muted py-12">
-            <p>No teams found. You can skip this step.</p>
+        <div className="mx-auto mb-4 w-full max-w-[920px]">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted">
+              <SearchIcon />
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search teams..."
+              className="w-full rounded-xl border border-muted/15 bg-surface pl-10 pr-4 py-3 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:border-accent/50"
+            />
           </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8 max-h-[420px] overflow-y-auto pr-1">
-            {visibleTeams.map((team) => {
-              const isSelected = selectedTeams.includes(team.id);
-              return (
-                <button
-                  key={team.id}
-                  onClick={() => toggleTeam(team.id)}
-                  className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${
-                    isSelected
-                      ? "border-accent bg-accent/10 scale-[1.02]"
-                      : "border-muted/15 bg-surface hover:border-muted/30"
-                  }`}
-                >
-                  {team.logo ? (
-                    <img
-                      src={team.logo}
-                      alt={team.name}
-                      className="w-12 h-12 object-contain"
-                      onError={(e) => {
-                        const el = e.target as HTMLImageElement;
-                        el.style.display = "none";
-                        const fallback = el.nextElementSibling as HTMLElement;
-                        if (fallback) fallback.style.display = "flex";
-                      }}
-                    />
-                  ) : null}
-                  <div
-                    className={`w-12 h-12 bg-muted/20 rounded-full items-center justify-center text-sm font-bold text-muted ${team.logo ? "hidden" : "flex"}`}
-                  >
-                    {team.shortName}
-                  </div>
-                  <span className="text-sm text-foreground font-medium text-center leading-tight">
-                    {team.name}
-                  </span>
-                  <span className="text-xs text-muted">{team.league}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        </div>
 
-        {/* Complete */}
-        <button
-          onClick={handleComplete}
-          disabled={isSubmitting}
-          className="w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all disabled:opacity-40"
-        >
-          {isSubmitting
-            ? "Finishing..."
-            : selectedTeams.length > 0
-              ? `Complete Setup (${selectedTeams.length} ${selectedTeams.length === 1 ? "team" : "teams"})`
-              : "Skip for now"
-          }
-        </button>
+        <div className="mx-auto mb-5 w-full max-w-[920px] 2xl:hidden">
+          <TeamFilterPanel
+            title={filterTitle}
+            groups={panelGroups}
+            selectedGroups={selectedGroupNames}
+            emptyStateText={filterEmptyStateText}
+            isLoading={!isLeagueFilterMode && isGroupsLoading}
+            layout="grid"
+            onClearAll={handleFilterClearAll}
+            onToggleGroup={handleFilterToggle}
+          />
+        </div>
+
+        <div className="relative">
+          <aside className="absolute right-0 top-0 hidden w-[250px] 2xl:block">
+            <div className="sticky top-6">
+              <TeamFilterPanel
+                title={filterTitle}
+                groups={panelGroups}
+                selectedGroups={selectedGroupNames}
+                emptyStateText={filterEmptyStateText}
+                isLoading={!isLeagueFilterMode && isGroupsLoading}
+                layout="stack"
+                onClearAll={handleFilterClearAll}
+                onToggleGroup={handleFilterToggle}
+              />
+            </div>
+          </aside>
+
+          <div className="mx-auto w-full max-w-[920px]">
+            {teamsError && !isLoading && (
+              <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+                <p>{teamsError}</p>
+                <button
+                  type="button"
+                  onClick={fetchTeams}
+                  className="inline-flex shrink-0 items-center justify-center rounded-full bg-accent px-4 py-2 text-xs font-semibold text-white transition hover:bg-accent/90"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {visibleTeams.length === 0 ? (
+              <div className="mb-6 flex min-h-[520px] items-center justify-center rounded-2xl border border-muted/10 bg-surface/40 px-6 py-16 text-center text-muted">
+                <p>
+                  No teams found.
+                  {searchQuery ? " Try a different search." : " You can skip this step for now."}
+                </p>
+              </div>
+            ) : (
+              <div className="mb-6 grid min-h-[520px] max-h-[520px] grid-cols-1 gap-4 overflow-y-auto px-1 py-1 custom-scrollbar content-start sm:grid-cols-2 lg:grid-cols-3">
+                {visibleTeams.map((team) => {
+                  const isSelected = selectedTeams.includes(team.id);
+
+                  return (
+                    <button
+                      key={team.id}
+                      type="button"
+                      onClick={() => toggleTeam(team.id)}
+                      className={`relative flex min-h-[164px] flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-5 text-center transition-all ${
+                        isSelected
+                          ? "border-accent bg-accent/10 shadow-[0_0_0_1px_rgba(46,142,255,0.16)]"
+                          : "border-muted/15 bg-surface hover:border-muted/30"
+                      }`}
+                    >
+                      {isSelected && (
+                        <span className="absolute right-3 top-3 inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white">
+                          <CheckIcon />
+                        </span>
+                      )}
+
+                      <div className="relative flex h-14 w-14 items-center justify-center">
+                        {team.logo ? (
+                          <img
+                            src={team.logo}
+                            alt={team.name}
+                            className="h-14 w-14 object-contain"
+                            onError={(event) => {
+                              const image = event.target as HTMLImageElement;
+                              image.style.display = "none";
+
+                              const fallback = image.nextElementSibling as HTMLElement | null;
+                              if (fallback) {
+                                fallback.style.display = "flex";
+                              }
+                            }}
+                          />
+                        ) : null}
+
+                        <div
+                          className={`h-11 w-11 items-center justify-center rounded-full bg-muted/15 text-xs font-semibold text-muted ${
+                            team.logo ? "hidden" : "flex"
+                          }`}
+                        >
+                          {team.shortName}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="block text-sm font-semibold leading-tight text-foreground">
+                          {team.name}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted">{team.league}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectedTeams.length > 0 && (
+              <p className="mb-3 text-center text-sm font-medium text-accent">
+                {selectedTeams.length} team{selectedTeams.length !== 1 ? "s" : ""} selected
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={handleComplete}
+              disabled={isSubmitting}
+              className="w-full rounded-lg bg-accent py-3 font-medium text-white transition-all hover:bg-accent-hover disabled:opacity-40"
+            >
+              {isSubmitting
+                ? "Finishing..."
+                : selectedTeams.length > 0
+                  ? `Complete Setup (${selectedTeams.length} ${selectedTeams.length === 1 ? "team" : "teams"})`
+                  : "Skip for now"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -237,12 +648,13 @@ export default function OnboardingStep3() {
 
 function OnboardingProgress({ currentStep }: { currentStep: number }) {
   const steps = [1, 2, 3];
+
   return (
-    <div className="flex items-center justify-center gap-2 mb-8">
+    <div className="mb-8 flex items-center justify-center gap-2">
       {steps.map((step) => (
         <div
           key={step}
-          className={`w-10 h-1.5 rounded-full transition-colors ${
+          className={`h-1.5 w-10 rounded-full transition-colors ${
             step <= currentStep ? "bg-accent" : "bg-muted/30"
           }`}
         />

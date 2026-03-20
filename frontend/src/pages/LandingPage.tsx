@@ -4,12 +4,20 @@
  * Public marketing page. Hero fills the viewport.
  * Sports badges and features visible on scroll.
  */
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { ROUTES, SUPPORTED_SPORTS } from "../constants";
+import { useAuth } from "../context/AuthContext";
 import Logo from "../components/Logo";
 import Footer from "../components/Footer";
 
 export default function LandingPage() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  /* Authenticated users should see the dashboard, not the marketing page */
+  if (!isLoading && isAuthenticated) {
+    return <Navigate to={ROUTES.DASHBOARD} replace />;
+  }
+
   return (
     <div className="bg-background text-foreground">
       {/* Navbar */}
@@ -39,7 +47,7 @@ export default function LandingPage() {
           <span className="text-foreground">Sync</span>
         </h1>
         <p className="text-lg text-muted max-w-lg mx-auto leading-relaxed mb-8">
-          Live scores, personalized feeds, and ML-powered predictions across NFL, NBA, MLB, NHL, MLS, and EPL.
+          Live scores, personalized feeds, and ML-powered predictions across NFL, NBA, MLB, NHL, and EPL.
         </p>
         <div className="flex gap-3">
           <Link

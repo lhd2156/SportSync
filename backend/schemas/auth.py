@@ -10,6 +10,42 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+def _parse_flexible_date(v: object) -> date:
+    """Parse date from multiple formats: YYYY-MM-DD, MM/DD/YYYY, MMDDYYYY, etc."""
+    if isinstance(v, date):
+        return v
+    if not isinstance(v, str):
+        raise ValueError("Date must be a string or date object")
+
+    s = v.strip()
+    if not s:
+        raise ValueError("Date of birth is required")
+
+    # ISO format: YYYY-MM-DD
+    if len(s) == 10 and s[4] == "-":
+        parts = s.split("-")
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+
+    # US format: MM/DD/YYYY or M/D/YYYY
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) == 3:
+            return date(int(parts[2]), int(parts[0]), int(parts[1]))
+
+    # Dash-separated: MM-DD-YYYY
+    if "-" in s and len(s.split("-")) == 3:
+        parts = s.split("-")
+        if len(parts[0]) <= 2:
+            return date(int(parts[2]), int(parts[0]), int(parts[1]))
+
+    # Pure digits: MMDDYYYY
+    digits = s.replace("/", "").replace("-", "")
+    if len(digits) == 8:
+        return date(int(digits[4:8]), int(digits[0:2]), int(digits[2:4]))
+
+    raise ValueError(f"Cannot parse date: {v}. Use YYYY-MM-DD or MM/DD/YYYY format.")
+
+
 class RegisterRequest(BaseModel):
     email: str
     password: str = Field(min_length=8, max_length=128)
@@ -26,6 +62,11 @@ class RegisterRequest(BaseModel):
         if "@" not in v:
             raise ValueError("Must be a valid email address")
         return v.strip().lower()
+
+    @field_validator("date_of_birth", mode="before")
+    @classmethod
+    def parse_dob(cls, v: object) -> date:
+        return _parse_flexible_date(v)
 
 
 
@@ -61,6 +102,8 @@ class AuthResponse(BaseModel):
     profile_picture_url: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    provider: Optional[str] = None
+    has_password: bool = False
 
 
 class OnboardingStep1Request(BaseModel):
@@ -68,6 +111,11 @@ class OnboardingStep1Request(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
     gender: Optional[str] = None
     profile_picture_url: Optional[str] = None
+
+    @field_validator("date_of_birth", mode="before")
+    @classmethod
+    def parse_dob(cls, v: object) -> date:
+        return _parse_flexible_date(v)
 
 
 class OnboardingStep2Request(BaseModel):
@@ -81,6 +129,23 @@ class OnboardingCompleteRequest(BaseModel):
 class SetPasswordRequest(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     confirm_password: str = Field(min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def email_must_have_at(cls, v: str) -> str:
+        if "@" not in v:
+            raise ValueError("Must be a valid email address")
+        return v.strip().lower()
 
 
 class TokenRefreshResponse(BaseModel):

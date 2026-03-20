@@ -23,7 +23,7 @@ const SIZES = {
   xl: { text: "text-5xl sm:text-6xl", icon: "w-12 h-12", gap: "gap-3" },
 };
 
-export default function Logo({ size = "md", showIcon = true, linkTo = ROUTES.HOME }: LogoProps) {
+export default function Logo({ size = "md", showIcon = true, linkTo = ROUTES.DASHBOARD }: LogoProps) {
   const s = SIZES[size];
 
   const content = (

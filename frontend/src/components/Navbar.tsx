@@ -23,12 +23,7 @@ export default function Navbar() {
     {
       label: "Dashboard",
       to: ROUTES.DASHBOARD,
-      active: location.pathname === ROUTES.DASHBOARD,
-    },
-    {
-      label: "Scores",
-      to: ROUTES.SCORES,
-      active: location.pathname === ROUTES.SCORES || location.pathname.startsWith("/games/"),
+      active: location.pathname === ROUTES.DASHBOARD || location.pathname.startsWith("/games/"),
     },
     {
       label: "Teams",
@@ -47,7 +42,7 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between gap-4 h-14">
           <div className="flex min-w-0 items-center gap-8">
-            <Logo size="md" linkTo={ROUTES.DASHBOARD} />
+            <Logo size="md" linkTo={ROUTES.HOME} />
 
             <div className="hidden md:flex items-center gap-5 overflow-x-auto scrollbar-hide">
               {navItems.map((item) => (

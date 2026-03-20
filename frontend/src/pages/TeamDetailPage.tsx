@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import FavoriteIcon from "../components/FavoriteIcon";
 import ScoreCard from "../components/ScoreCard";
 import apiClient from "../api/client";
 import { API } from "../constants";
@@ -136,13 +137,14 @@ export default function TeamDetailPage() {
             </div>
             <button
               onClick={() => isSaved ? unsaveMutation.mutate() : saveMutation.mutate()}
-              className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium transition-colors ${
                 isSaved
                   ? "bg-accent/20 text-accent border border-accent/30"
                   : "bg-accent hover:bg-accent-hover text-foreground"
               }`}
             >
-              {isSaved ? "★ Saved" : "☆ Save Team"}
+              <FavoriteIcon className="w-4 h-4" filled={isSaved} />
+              <span>{isSaved ? "Saved" : "Save Team"}</span>
             </button>
           </div>
         </div>

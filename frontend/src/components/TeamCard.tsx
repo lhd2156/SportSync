@@ -3,6 +3,14 @@ import SafeAvatar from "./SafeAvatar";
 import TeamFollowButton from "./TeamFollowButton";
 import type { Team } from "../types";
 
+function makeSlug(name: string): string {
+  return name.toLowerCase().trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 interface TeamCardProps {
   team: Team;
   isFollowing: boolean;
@@ -11,19 +19,28 @@ interface TeamCardProps {
 export default function TeamCard({ team, isFollowing }: TeamCardProps) {
   const navigate = useNavigate();
   const accent = team.color?.startsWith("#") ? team.color : team.color ? `#${team.color}` : "#2E8EFF";
+  const normalizedCity = (team.city || "").trim();
+  const normalizedName = team.name.trim().toLowerCase();
+  const subtitle =
+    normalizedCity &&
+    normalizedCity.toLowerCase() !== normalizedName &&
+    !normalizedName.startsWith(normalizedCity.toLowerCase())
+      ? normalizedCity
+      : "";
+  const slug = makeSlug(team.name);
 
   return (
     <article
       role="button"
       tabIndex={0}
-      onClick={() => navigate(`/teams/${team.id}`)}
+      onClick={() => navigate(`/teams/${slug}`)}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          navigate(`/teams/${team.id}`);
+          navigate(`/teams/${slug}`);
         }
       }}
-      className="group relative overflow-hidden rounded-3xl border border-muted/15 bg-surface px-5 py-5 transition-all hover:border-accent/30 hover:bg-surface/95"
+      className="group relative overflow-hidden rounded-3xl border border-muted/15 bg-surface px-5 py-5 transition-all hover:border-accent/30 hover:bg-surface/95 min-h-[120px]"
     >
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-28 opacity-80"
@@ -59,7 +76,7 @@ export default function TeamCard({ team, isFollowing }: TeamCardProps) {
             <h3 className="text-lg font-semibold text-foreground transition-colors group-hover:text-white">
               {team.name}
             </h3>
-            <p className="text-sm text-muted">{team.city || "League club"}</p>
+            {subtitle ? <p className="text-sm text-muted">{subtitle}</p> : null}
           </div>
         </div>
 

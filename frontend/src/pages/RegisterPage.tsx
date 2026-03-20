@@ -121,7 +121,7 @@ export default function RegisterPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="reg-dob" className="block text-sm text-muted mb-1">Date of Birth</label>
-                  <div className="flex gap-1.5">
+                  <div className="relative">
                     <input
                       id="reg-dob"
                       type="text"
@@ -137,10 +137,10 @@ export default function RegisterPage() {
                           setDateOfBirth("");
                         }
                       }}
-                      className={inputCls + " flex-1"}
+                      className={inputCls + " pr-10"}
                       placeholder="MM/DD/YYYY"
                     />
-                    <div className="relative">
+                    <div className="absolute right-0 top-0 h-full flex items-center pr-2">
                       <input
                         type="date"
                         value={dateOfBirth}
@@ -151,11 +151,9 @@ export default function RegisterPage() {
                         className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                         tabIndex={-1}
                       />
-                      <button type="button" className="h-full px-2.5 bg-background border border-muted/20 rounded-lg text-muted hover:text-foreground hover:border-muted/40 transition-all flex items-center" tabIndex={-1}>
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </button>
+                      <svg className="w-4 h-4 text-muted pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
                     </div>
                   </div>
                 </div>

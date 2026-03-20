@@ -171,21 +171,21 @@ export default function OnboardingStep1() {
             {errors.displayName && <p className="text-red-400 text-xs mt-1">{errors.displayName}</p>}
           </div>
 
-          {/* Date of Birth — text input + hidden calendar */}
+          {/* Date of Birth — text input with inline calendar */}
           <div>
             <label htmlFor="onb-dob" className="block text-sm text-muted mb-1">
               Date of Birth
             </label>
-            <div className="flex gap-2">
+            <div className="relative">
               <input
                 id="onb-dob"
                 type="text"
                 value={dobDisplay}
                 onChange={(e) => handleDobTextChange(e.target.value)}
-                className={`${errors.dob ? inputErr : inputOk} flex-1`}
-                placeholder="MM/DD/YYYY or 04302004"
+                className={`${errors.dob ? inputErr : inputOk} pr-11`}
+                placeholder="MM/DD/YYYY"
               />
-              <div className="relative">
+              <div className="absolute right-0 top-0 h-full flex items-center pr-2">
                 <input
                   type="date"
                   value={dobIso}
@@ -193,15 +193,9 @@ export default function OnboardingStep1() {
                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                   tabIndex={-1}
                 />
-                <button
-                  type="button"
-                  className="h-full px-3 bg-surface border border-muted/20 rounded-lg text-muted hover:text-foreground hover:border-muted/40 transition-all flex items-center"
-                  tabIndex={-1}
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </button>
+                <svg className="w-5 h-5 text-muted pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
               </div>
             </div>
             {errors.dob ? (

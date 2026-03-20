@@ -47,6 +47,8 @@ class PredictionResponse(BaseModel):
     away_win_prob: float
     model_version: str
     created_at: datetime
+    confidence: Optional[float] = None
+    factors: Optional[list[str]] = None
 
     class Config:
         from_attributes = True

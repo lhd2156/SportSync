@@ -28,6 +28,8 @@ RATE_LIMIT_LOGIN_MAX = 10          # 10 attempts per IP per window
 RATE_LIMIT_LOGIN_WINDOW = 900      # 15 minute window
 RATE_LIMIT_REGISTER_MAX = 5        # 5 registrations per IP per window
 RATE_LIMIT_REGISTER_WINDOW = 3600  # 1 hour window
+RATE_LIMIT_PASSWORD_RESET_MAX = 3  # 3 reset requests per email per window
+RATE_LIMIT_PASSWORD_RESET_WINDOW = 3600  # 1 hour window
 
 # Redis Key Prefixes
 REDIS_PREFIX_SESSION = "session:"
@@ -35,6 +37,7 @@ REDIS_PREFIX_FEED = "feed:"
 REDIS_PREFIX_BLACKLIST = "blacklist:"
 REDIS_PREFIX_RATE_LIMIT = "rate:"
 REDIS_PREFIX_CACHE = "cache:"
+REDIS_PREFIX_PASSWORD_RESET = "password-reset:"
 
 # Redis Pub/Sub Channels
 REDIS_CHANNEL_LIVE_SCORES = "scores:live"

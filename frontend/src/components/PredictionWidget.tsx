@@ -28,7 +28,7 @@ function PredictionWidget({
   ];
 
   return (
-    <div className="bg-surface border border-muted/15 rounded-xl p-6">
+    <div className="bg-surface border border-muted/15 rounded-xl p-6 game-detail-enter">
       <h3 className="text-foreground font-medium mb-4">Win Probability</h3>
       <ResponsiveContainer width="100%" height={120}>
         <BarChart data={data} layout="vertical" margin={{ left: 0, right: 40 }}>
