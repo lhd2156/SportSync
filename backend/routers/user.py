@@ -6,9 +6,10 @@ All routes require authentication via get_current_user dependency.
 """
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
-from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
@@ -24,7 +25,12 @@ from schemas.sports import TeamResponse
 from services.auth_service import verify_password
 from services.cache_service import delete_cached
 from constants import REDIS_PREFIX_FEED
-from services.profile_validation import normalize_display_handle, validate_display_handle, validate_person_name
+from services.profile_validation import (
+    normalize_display_handle,
+    normalize_display_handle_key,
+    validate_display_handle,
+    validate_person_name,
+)
 from services.storage_service import (
     build_local_avatar_public_url,
     delete_avatar,
@@ -42,6 +48,11 @@ def _normalize_display_name(display_name: str | None) -> str:
     return normalize_display_handle(display_name)
 
 
+def _normalize_display_name_key(display_name: str | None) -> str:
+    """Build the unique storage key for display handles."""
+    return normalize_display_handle_key(display_name)
+
+
 def _find_conflicting_display_name(
     db: Session,
     display_name: str | None,
@@ -54,11 +65,30 @@ def _find_conflicting_display_name(
         return None
 
     query = db.query(User).filter(
-        func.lower(User.display_name) == normalized_display_name.lower()
+        User.display_name_normalized == _normalize_display_name_key(normalized_display_name)
     )
     if exclude_user_id:
         query = query.filter(User.id != exclude_user_id)
     return query.first()
+
+
+def _is_display_name_integrity_error(error: IntegrityError) -> bool:
+    details = " ".join(
+        str(part)
+        for part in (error.orig, error.statement, error.params)
+        if part is not None
+    ).lower()
+    return "display_name_normalized" in details
+
+
+def _commit_or_raise_display_name_conflict(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_display_name_integrity_error(exc):
+            raise HTTPException(status_code=409, detail="Display handle already taken") from exc
+        raise
 
 
 def _resolve_team_record(db: Session, team_id: str) -> Team | None:
@@ -113,6 +143,7 @@ async def update_profile(
         if existing_display:
             raise HTTPException(status_code=409, detail="Display handle already taken")
         user.display_name = normalized_display_name
+        user.display_name_normalized = _normalize_display_name_key(normalized_display_name)
     if body.first_name is not None:
         normalized_first_name = validate_person_name(body.first_name, "First name")
         user.first_name = normalized_first_name
@@ -133,7 +164,7 @@ async def update_profile(
             db.add(UserSport(user_id=user.id, sport=sport))
         delete_cached(f"{REDIS_PREFIX_FEED}{user.id}")
 
-    db.commit()
+    _commit_or_raise_display_name_conflict(db)
     return {"detail": "Profile updated"}
 
 
@@ -198,8 +229,8 @@ async def delete_account(
     db.delete(db_user)
     db.commit()
 
-    response.delete_cookie("refresh_token", path="/")
-    response.delete_cookie("session_token", path="/")
+    response.delete_cookie("refresh_token", path="/", domain=settings.cookie_domain_value)
+    response.delete_cookie("session_token", path="/", domain=settings.cookie_domain_value)
     return {"detail": "Account deleted"}
 
 

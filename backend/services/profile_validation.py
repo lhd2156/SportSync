@@ -29,6 +29,11 @@ def normalize_display_handle(value: str | None) -> str:
     return str(value or "").strip()
 
 
+def normalize_display_handle_key(value: str | None) -> str:
+    normalized = normalize_display_handle(value)
+    return normalized.lower()
+
+
 def is_valid_display_handle(value: str | None) -> bool:
     normalized = normalize_display_handle(value)
     return bool(normalized and DISPLAY_HANDLE_PATTERN.fullmatch(normalized))
