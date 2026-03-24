@@ -14,7 +14,7 @@ import LiveBadge from "../components/LiveBadge";
 import Footer from "../components/Footer";
 import apiClient from "../api/client";
 
-interface ScoreGame {
+type ScoreGame = {
   id: string;
   home_team: { id: string; name: string; short_name?: string; logo_url?: string | null };
   away_team: { id: string; name: string; short_name?: string; logo_url?: string | null };
@@ -24,7 +24,7 @@ interface ScoreGame {
   home_score: number;
   away_score: number;
   scheduled_at: string;
-}
+};
 
 export default function ScoresPage() {
   const [activeSport, setActiveSport] = useState("ALL");

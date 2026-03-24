@@ -9,9 +9,9 @@ import { useState } from "react";
 import { useCookieConsent } from "../context/CookieContext";
 import type { CookiePreferences } from "../types";
 
-interface CookieModalProps {
+type CookieModalProps = {
   onClose: () => void;
-}
+};
 
 export default function CookieModal({ onClose }: CookieModalProps) {
   const { preferences, savePreferences } = useCookieConsent();

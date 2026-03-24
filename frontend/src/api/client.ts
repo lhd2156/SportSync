@@ -8,8 +8,22 @@
  */
 import axios from "axios";
 import { API } from "../constants";
+import { normalizeConfiguredLoopbackUrl } from "../utils/http";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+function resolveApiBaseUrl(): string {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+  if (configured) {
+    return normalizeConfiguredLoopbackUrl(configured);
+  }
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return "http://localhost:8000";
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 /* Access token stored in memory only, never in localStorage or sessionStorage */
 let accessToken: string | null = null;
@@ -51,7 +65,7 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       try {
         const refreshResponse = await apiClient.post(API.AUTH_REFRESH);
-        const newToken = refreshResponse.data.accessToken;
+        const newToken = refreshResponse.data.access_token;
         setAccessToken(newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return apiClient(originalRequest);

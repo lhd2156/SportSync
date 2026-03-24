@@ -6,7 +6,7 @@ Paginated (20 per page).
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Any, Optional
 
 from database import get_db
 from models.game import Game
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/scores", tags=["scores"])
 DEFAULT_PAGE_SIZE = 20
 
 
-@router.get("")
+@router.get("", response_model=list[dict[str, Any]])
 async def get_scores(
     sport: Optional[str] = Query(None),
     page: int = Query(1, ge=1),

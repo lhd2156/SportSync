@@ -15,6 +15,8 @@ dist/
 build/
 *.egg-info/
 .pytest_cache/
+pytest-cache-files-*/
+**/pytest-cache-files-*/
 .mypy_cache/
 htmlcov/
 .coverage
@@ -32,6 +34,9 @@ realtime/*.exe
 node_modules/
 frontend/dist/
 frontend/build/
+frontend/.npm-cache/
+frontend/playwright-report/
+frontend/test-results/
 .next/
 *.tsbuildinfo
 .eslintcache
@@ -51,6 +56,22 @@ Thumbs.db
 *.log
 logs/
 npm-debug.log*
+tmp-gh-logs/
+output/
+
+# Local caches and temp tooling
+.cache/
+.gocache/
+.pip-tmp/
+.pydeps313/
+.wheels/
+.playwright-cli/
+backend/cache/
+tmp_*.py
+.tmp_*
+python-version.*
+playwright-*.png
+highlights-*.png
 
 # AWS
 .aws/
@@ -59,3 +80,4 @@ npm-debug.log*
 
 # Alembic (keep migration scripts, only ignore temp files)
 backend/migrations/__pycache__/
+*.db

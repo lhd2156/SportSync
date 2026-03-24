@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -17,9 +16,9 @@ from database import Base
 class Game(Base):
     __tablename__ = "games"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    home_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
-    away_team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    home_team_id = Column(String(36), ForeignKey("teams.id"), nullable=False)
+    away_team_id = Column(String(36), ForeignKey("teams.id"), nullable=False)
     sport = Column(String(50), nullable=False, index=True)
     league = Column(String(50), nullable=False, index=True)
     scheduled_at = Column(DateTime, nullable=False, index=True)

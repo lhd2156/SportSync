@@ -19,7 +19,9 @@ SPORTSDB_BASE_URL = "https://www.thesportsdb.com/api/v1/json"
 
 def _api_url(endpoint: str) -> str:
     """Build TheSportsDB API URL with the configured API key."""
-    key = settings.sportsdb_api_key or "3"
+    key = settings.sportsdb_api_key.strip()
+    if not key:
+        raise RuntimeError("SPORTSDB_API_KEY is not configured.")
     return f"{SPORTSDB_BASE_URL}/{key}/{endpoint}"
 
 

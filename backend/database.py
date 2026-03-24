@@ -9,7 +9,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 from config import settings
 
-# Create engine with connection pooling
+if settings.database_url.startswith("sqlite"):
+    raise RuntimeError(
+        "SQLite is no longer supported. Configure DATABASE_URL for PostgreSQL."
+    )
+
 engine = create_engine(
     settings.database_url,
     pool_size=10,

@@ -10,13 +10,13 @@ import type { ReactNode } from "react";
 import { COOKIE_NAMES } from "../constants";
 import type { CookiePreferences } from "../types";
 
-interface CookieContextValue {
+type CookieContextValue = {
   hasConsent: boolean;
   preferences: CookiePreferences;
   showBanner: boolean;
   acceptAll: () => void;
   savePreferences: (prefs: CookiePreferences) => void;
-}
+};
 
 const DEFAULT_PREFERENCES: CookiePreferences = {
   essential: true,

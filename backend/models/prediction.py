@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, Float, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -17,8 +16,8 @@ from database import Base
 class Prediction(Base):
     __tablename__ = "predictions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    game_id = Column(UUID(as_uuid=True), ForeignKey("games.id"), nullable=False, unique=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    game_id = Column(String(36), ForeignKey("games.id"), nullable=False, unique=True)
     home_win_prob = Column(Float, nullable=False)
     away_win_prob = Column(Float, nullable=False)
     model_version = Column(String(50), nullable=False)

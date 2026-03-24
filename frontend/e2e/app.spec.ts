@@ -8,8 +8,8 @@ test.describe("Public Pages", () => {
 
   test("landing page has Get Started and Sign In buttons", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByText("Get Started")).toBeVisible();
-    await expect(page.getByText("Sign In")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Get Started" })).toHaveCount(2);
+    await expect(page.getByRole("link", { name: "Sign In" })).toHaveCount(2);
   });
 
   test("login page loads", async ({ page }) => {

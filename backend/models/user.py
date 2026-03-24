@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Column, String, Boolean, Integer, DateTime, Date
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -17,7 +16,7 @@ from database import Base
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(255), unique=True, nullable=False, index=True)
 
     # Nullable for Google OAuth users who register without a password
@@ -27,6 +26,8 @@ class User(Base):
     google_id = Column(String, nullable=True, unique=True)
 
     display_name = Column(String(100), nullable=True)
+    first_name = Column(String(50), nullable=True)
+    last_name = Column(String(50), nullable=True)
     date_of_birth = Column(Date, nullable=True)
     gender = Column(String(50), nullable=True)
     profile_picture_url = Column(String, nullable=True)
@@ -34,7 +35,7 @@ class User(Base):
     # Users cannot access the dashboard until onboarding is complete
     is_onboarded = Column(Boolean, default=False, nullable=False)
 
-    # Account lockout: lock after 5 failed login attempts for 15 minutes
+    # Account lockout: lock after 3 failed login attempts for 15 minutes
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 

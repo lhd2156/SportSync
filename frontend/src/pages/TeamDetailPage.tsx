@@ -17,12 +17,13 @@ import {
 } from "recharts";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
+import FavoriteIcon from "../components/FavoriteIcon";
 import ScoreCard from "../components/ScoreCard";
 import apiClient from "../api/client";
 import { API } from "../constants";
 import type { Team } from "../types";
 
-interface GameResult {
+type GameResult = {
   id: string;
   home_team: { id: string; name: string; short_name?: string; logo_url?: string | null };
   away_team: { id: string; name: string; short_name?: string; logo_url?: string | null };
@@ -32,7 +33,7 @@ interface GameResult {
   league: string;
   sport: string;
   scheduled_at: string;
-}
+};
 
 export default function TeamDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -130,19 +131,20 @@ export default function TeamDetailPage() {
               <p className="text-muted">{team.league} • {team.city}</p>
               {chartData.length > 0 && (
                 <p className="text-sm text-foreground-base mt-1">
-                  Recent: <span className="text-green-400">{wins}W</span> - <span className="text-red-400">{losses}L</span>
+                  Recent: <span className="surface-status-positive">{wins}W</span> - <span className="surface-status-negative">{losses}L</span>
                 </p>
               )}
             </div>
             <button
               onClick={() => isSaved ? unsaveMutation.mutate() : saveMutation.mutate()}
-              className={`px-6 py-2.5 rounded-lg font-medium transition-colors ${
+              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium transition-colors ${
                 isSaved
                   ? "bg-accent/20 text-accent border border-accent/30"
                   : "bg-accent hover:bg-accent-hover text-foreground"
               }`}
             >
-              {isSaved ? "★ Saved" : "☆ Save Team"}
+              <FavoriteIcon className="w-4 h-4" filled={isSaved} />
+              <span>{isSaved ? "Saved" : "Save Team"}</span>
             </button>
           </div>
         </div>
@@ -153,29 +155,29 @@ export default function TeamDetailPage() {
             <h2 className="text-lg font-semibold text-foreground mb-4">Score Trend (Last 10 Games)</h2>
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 12 }} />
-                <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                <XAxis dataKey="date" tick={{ fill: "var(--chart-axis)", fontSize: 12 }} />
+                <YAxis tick={{ fill: "var(--chart-axis)", fontSize: 12 }} />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "#1a1a2e",
-                    border: "1px solid rgba(255,255,255,0.1)",
+                    backgroundColor: "var(--chart-tooltip-panel)",
+                    border: "1px solid var(--chart-tooltip-border)",
                     borderRadius: "8px",
-                    color: "#e2e8f0",
+                    color: "var(--chart-tooltip-text)",
                   }}
                 />
                 <Line
                   type="monotone"
                   dataKey="score"
-                  stroke="#2E8EFF"
+                  stroke="var(--accent)"
                   strokeWidth={2}
-                  dot={{ fill: "#2E8EFF", r: 4 }}
+                  dot={{ fill: "var(--accent)", r: 4 }}
                   name="Team Score"
                 />
                 <Line
                   type="monotone"
                   dataKey="opponent"
-                  stroke="#94a3b8"
+                  stroke="var(--chart-axis)"
                   strokeWidth={1}
                   strokeDasharray="5 5"
                   dot={false}

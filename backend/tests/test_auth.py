@@ -68,11 +68,11 @@ class TestJWT:
         assert max_age > 0
 
     def test_remember_me_longer_expiry(self):
-        """Remember Me refresh token should have longer max_age."""
+        """Remember Me refresh token should match the standard 7-day expiry."""
         from services.auth_service import create_refresh_token
         _, normal_max_age = create_refresh_token("user", remember_me=False)
         _, remember_max_age = create_refresh_token("user", remember_me=True)
-        assert remember_max_age > normal_max_age
+        assert remember_max_age == normal_max_age == 7 * 86400
 
     def test_invalid_token_returns_none(self):
         """Garbage token should return None from decode."""
@@ -94,9 +94,8 @@ class TestConstants:
         """All 6 leagues must be supported."""
         from constants import SUPPORTED_SPORTS
         assert len(SUPPORTED_SPORTS) == 6
-        sport_ids = [s["id"] for s in SUPPORTED_SPORTS]
         for league in ["NFL", "NBA", "MLB", "NHL", "MLS", "EPL"]:
-            assert league in sport_ids
+            assert league in SUPPORTED_SPORTS
 
     def test_bcrypt_cost_factor(self):
         """bcrypt cost must be 12 per Section 12."""

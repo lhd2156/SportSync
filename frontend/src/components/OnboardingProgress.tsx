@@ -6,9 +6,9 @@
  */
 import { memo } from "react";
 
-interface OnboardingProgressProps {
+type OnboardingProgressProps = {
   currentStep: 1 | 2 | 3;
-}
+};
 
 const STEPS = [
   { num: 1, label: "Profile" },

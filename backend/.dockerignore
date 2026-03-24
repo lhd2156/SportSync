@@ -1,0 +1,15 @@
+.git
+.pytest_cache
+__pycache__
+cache
+pytest-cache-files-*
+*.pyc
+*.pyo
+*.pyd
+*.log
+uvicorn*.log
+uvicorn*.err.log
+uvicorn*.out.log
+sportsync.db
+tests
+.env

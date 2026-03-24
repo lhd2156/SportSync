@@ -10,11 +10,11 @@
 import { Link } from "react-router-dom";
 import { ROUTES } from "../constants";
 
-interface LogoProps {
+type LogoProps = {
   size?: "sm" | "md" | "lg" | "xl";
   showIcon?: boolean;
   linkTo?: string | null;
-}
+};
 
 const SIZES = {
   sm: { text: "text-lg", icon: "w-5 h-5", gap: "gap-1.5" },
@@ -23,7 +23,7 @@ const SIZES = {
   xl: { text: "text-5xl sm:text-6xl", icon: "w-12 h-12", gap: "gap-3" },
 };
 
-export default function Logo({ size = "md", showIcon = true, linkTo = ROUTES.HOME }: LogoProps) {
+export default function Logo({ size = "md", showIcon = true, linkTo = ROUTES.DASHBOARD }: LogoProps) {
   const s = SIZES[size];
 
   const content = (
