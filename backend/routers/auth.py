@@ -11,6 +11,7 @@ from datetime import date, datetime
 from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -63,6 +64,7 @@ from services.cache_service import redis_client
 from services.profile_validation import (
     is_valid_person_name,
     normalize_display_handle,
+    normalize_display_handle_key,
     sanitize_display_handle_candidate,
 )
 from constants import (
@@ -89,6 +91,11 @@ def _normalize_display_name(display_name: str | None) -> str:
     return normalize_display_handle(display_name)
 
 
+def _normalize_display_name_key(display_name: str | None) -> str:
+    """Build the unique storage key for display handles."""
+    return normalize_display_handle_key(display_name)
+
+
 def _find_user_by_email(db: Session, email: str | None) -> User | None:
     """Find a user by email using a case-insensitive, trimmed lookup."""
     normalized_email = _normalize_email(email)
@@ -113,11 +120,33 @@ def _find_user_by_display_name(
         return None
 
     query = db.query(User).filter(
-        func.lower(User.display_name) == normalized_display_name.lower()
+        User.display_name_normalized == _normalize_display_name_key(normalized_display_name)
     )
     if exclude_user_id:
         query = query.filter(User.id != exclude_user_id)
     return query.first()
+
+
+def _is_display_name_integrity_error(error: IntegrityError) -> bool:
+    details = " ".join(
+        str(part)
+        for part in (error.orig, error.statement, error.params)
+        if part is not None
+    ).lower()
+    return "display_name_normalized" in details
+
+
+def _commit_or_raise_display_name_conflict(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_display_name_integrity_error(exc):
+            raise HTTPException(
+                status_code=409,
+                detail="Display name already taken. Please choose another.",
+            ) from exc
+        raise
 
 
 def _generate_unique_display_name(
@@ -144,22 +173,22 @@ def _generate_unique_display_name(
 
 def _set_refresh_cookie(response: Response, token: str, max_age: int) -> None:
     """Set the refresh token as an HTTP-only cookie."""
-    secure_cookie = settings.environment.lower() == "production"
     response.set_cookie(
         key="refresh_token",
         value=token,
         max_age=max_age,
         httponly=True,
-        secure=secure_cookie,
-        samesite="strict",
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite_value,
         path="/",
+        domain=settings.cookie_domain_value,
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
     """Remove all auth cookies on logout."""
-    response.delete_cookie("refresh_token", path="/")
-    response.delete_cookie("session_token", path="/")
+    response.delete_cookie("refresh_token", path="/", domain=settings.cookie_domain_value)
+    response.delete_cookie("session_token", path="/", domain=settings.cookie_domain_value)
 
 
 def _calculate_age(dob: date) -> int:
@@ -312,12 +341,13 @@ async def register(
         first_name=body.first_name.strip(),
         last_name=body.last_name.strip(),
         display_name=normalized_display_name,
+        display_name_normalized=_normalize_display_name_key(normalized_display_name),
         date_of_birth=body.date_of_birth,
         gender=body.gender,
         is_onboarded=False,
     )
     db.add(user)
-    db.commit()
+    _commit_or_raise_display_name_conflict(db)
     db.refresh(user)
 
     access_token = create_access_token(str(user.id))
@@ -387,15 +417,15 @@ async def login(
         session_token = generate_session_token()
         if redis_client:
             store_session_in_redis(redis_client, session_token, str(user.id))
-        secure_cookie = settings.environment.lower() == "production"
         response.set_cookie(
             key="session_token",
             value=session_token,
             max_age=CACHE_TTL_SESSION,
             httponly=True,
-            secure=secure_cookie,
-            samesite="strict",
+            secure=settings.cookie_secure,
+            samesite=settings.cookie_samesite_value,
             path="/",
+            domain=settings.cookie_domain_value,
         )
 
     return AuthResponse(
@@ -477,8 +507,9 @@ async def google_auth(
                 profile_picture_url=google_picture,
                 is_onboarded=False,
             )
+            user.display_name_normalized = _normalize_display_name_key(user.display_name)
             db.add(user)
-            db.commit()
+            _commit_or_raise_display_name_conflict(db)
             db.refresh(user)
             is_new = True
         else:
@@ -498,12 +529,13 @@ async def google_auth(
                     google_display_name,
                     email.split("@")[0],
                 )
+                user.display_name_normalized = _normalize_display_name_key(user.display_name)
                 did_update = True
             if not getattr(user, "profile_picture_url", None) and google_picture:
                 user.profile_picture_url = google_picture
                 did_update = True
             if did_update:
-                db.commit()
+                _commit_or_raise_display_name_conflict(db)
                 db.refresh(user)
 
         access_token = create_access_token(str(user.id))
@@ -697,11 +729,12 @@ async def onboarding_step_1(
         )
 
     user.display_name = normalized_display_name
+    user.display_name_normalized = _normalize_display_name_key(normalized_display_name)
     user.date_of_birth = body.date_of_birth
     user.gender = body.gender
     if body.profile_picture_url:
         user.profile_picture_url = body.profile_picture_url.strip()
-    db.commit()
+    _commit_or_raise_display_name_conflict(db)
 
     return {"detail": "Step 1 complete"}
 
@@ -716,7 +749,7 @@ async def onboarding_step_2(
     db.query(UserSport).filter(UserSport.user_id == user.id).delete()
     for sport in body.sports:
         db.add(UserSport(user_id=user.id, sport=sport))
-    db.commit()
+    _commit_or_raise_display_name_conflict(db)
 
     return {"detail": "Step 2 complete"}
 
@@ -766,7 +799,7 @@ async def onboarding_complete(
         saved_team_ids.add(team.id)
 
     user.is_onboarded = True
-    db.commit()
+    _commit_or_raise_display_name_conflict(db)
 
     return {"detail": "Onboarding complete", "is_onboarded": True, "teams_saved": len(saved_team_ids)}
 

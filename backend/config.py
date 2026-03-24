@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     cors_origins: str = ""
     production_domain: str = ""
     redirect_allowlist: str = ""
+    cookie_domain: str = ""
+    cookie_samesite: str = "strict"
 
     # Environment
     environment: str = "development"
@@ -126,6 +128,37 @@ class Settings(BaseSettings):
         if self.environment.lower() != "production":
             return self._add_loopback_aliases(sorted(origins))
         return sorted(origins)
+
+    @property
+    def cookie_domain_value(self) -> str | None:
+        """Return the cookie domain for production deployments, or None for localhost/dev."""
+        configured = self.cookie_domain.strip()
+        if configured:
+            normalized = configured.lstrip(".").strip().lower()
+            if normalized and normalized not in {"localhost", "127.0.0.1"}:
+                return normalized
+
+        if self.environment.lower() != "production" or not self.production_domain.strip():
+            return None
+
+        parsed = urlparse(self.production_domain.strip())
+        host = (parsed.hostname or "").strip().lower().lstrip(".")
+        if not host or host in {"localhost", "127.0.0.1"}:
+            return None
+        return host
+
+    @property
+    def cookie_secure(self) -> bool:
+        """Cookies should only be marked secure outside local development."""
+        return self.environment.lower() == "production"
+
+    @property
+    def cookie_samesite_value(self) -> str:
+        """Normalize SameSite for FastAPI's cookie API."""
+        normalized = self.cookie_samesite.strip().lower()
+        if normalized in {"lax", "strict", "none"}:
+            return normalized
+        return "strict"
 
     model_config = SettingsConfigDict(
         env_file=BACKEND_DIR / ".env",

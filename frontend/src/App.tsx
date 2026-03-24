@@ -5,24 +5,14 @@
  * All routes defined here with appropriate guards.
  */
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./context/AuthContext";
 import { CookieProvider } from "./context/CookieContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import CookieBanner from "./components/CookieBanner";
 import ScrollToTop from "./components/ScrollToTop";
 import { ROUTES } from "./constants";
-
-/* React Query client */
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 30000,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+import { queryClient } from "./lib/queryClient";
 
 /* Pages */
 import LandingPage from "./pages/LandingPage";

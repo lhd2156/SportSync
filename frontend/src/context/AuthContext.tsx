@@ -10,6 +10,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from "rea
 import type { ReactNode } from "react";
 import apiClient, { setAccessToken } from "../api/client";
 import { API, STORAGE_KEYS } from "../constants";
+import { queryClient } from "../lib/queryClient";
 import type { User } from "../types";
 
 type AuthContextValue = {
@@ -84,6 +85,30 @@ function writeAuthUserSnapshot(user: User | null): void {
   }
 }
 
+function clearStorageNamespace(storage: Storage, prefix: string): void {
+  const keysToRemove: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key && key.startsWith(prefix)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  for (const key of keysToRemove) {
+    storage.removeItem(key);
+  }
+}
+
+function clearClientAuthArtifacts(): void {
+  try {
+    clearStorageNamespace(sessionStorage, "sportsync_");
+    clearStorageNamespace(localStorage, "sportsync_");
+    queryClient.clear();
+  } catch {
+    // Ignore storage/query cache cleanup failures.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -109,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* No valid session, user must log in */
       setAccessToken(null);
+      clearClientAuthArtifacts();
       syncUser(null);
     } finally {
       setIsLoading(false);
@@ -169,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await apiClient.post(API.AUTH_LOGOUT);
     } finally {
       setAccessToken(null);
+      clearClientAuthArtifacts();
       syncUser(null);
     }
   }, [syncUser]);
