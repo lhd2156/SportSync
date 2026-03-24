@@ -2,7 +2,8 @@
 Alembic migration environment for SportSync.
 
 Imports all models so autogenerate can detect schema changes.
-Reads the database URL from environment or alembic.ini.
+Reads the database URL from the shared backend settings so migrations
+target the same database as the application runtime.
 """
 import os
 import sys
@@ -15,16 +16,15 @@ from alembic import context
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import Base
+from config import settings
 
 # Import all models so Alembic discovers them for autogenerate
 import models  # noqa: F401
 
 config = context.config
 
-# Override sqlalchemy.url with environment variable if present
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# Always align Alembic with the backend runtime database URL.
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

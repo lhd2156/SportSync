@@ -5,7 +5,7 @@ Upcoming and recent games. Sport/league/status filtering. Paginated (20 per page
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Any, Optional
 
 from database import get_db
 from models.game import Game
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/games", tags=["games"])
 DEFAULT_PAGE_SIZE = 20
 
 
-@router.get("")
+@router.get("", response_model=list[dict[str, Any]])
 async def list_games(
     sport: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
@@ -66,7 +66,7 @@ async def list_games(
     return result
 
 
-@router.get("/{game_id}")
+@router.get("/{game_id}", response_model=dict[str, Any])
 async def get_game(game_id: str, db: Session = Depends(get_db)):
     """Single game detail with scores and prediction if available."""
     game = db.query(Game).filter(Game.id == game_id).first()

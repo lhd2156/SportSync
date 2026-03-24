@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { FiCalendar, FiTrendingUp, FiUsers } from "react-icons/fi";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { FiCalendar, FiChevronDown, FiTrendingUp, FiUsers } from "react-icons/fi";
 import apiClient from "../api/client";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
@@ -14,7 +14,7 @@ import type { Team } from "../types";
 
 type TeamTab = "overview" | "schedule" | "roster" | "stats";
 
-interface TeamMini {
+type TeamMini = {
   id?: string | null;
   externalId?: string | null;
   name: string;
@@ -23,9 +23,9 @@ interface TeamMini {
   city?: string | null;
   record?: string | null;
   color?: string | null;
-}
+};
 
-interface TeamScheduleGame {
+type TeamScheduleGame = {
   id: string;
   league: string;
   sport: string;
@@ -37,9 +37,9 @@ interface TeamScheduleGame {
   homeScore: number;
   awayScore: number;
   venue?: string | null;
-}
+};
 
-interface TeamRosterPlayer {
+type TeamRosterPlayer = {
   id: string;
   name: string;
   shortName: string;
@@ -48,16 +48,90 @@ interface TeamRosterPlayer {
   jersey?: string | null;
   status?: string | null;
   facts: Array<{ label: string; value: string }>;
-}
+};
 
-interface TeamDetailData extends Team {
+type TeamSeasonOption = {
+  year: string;
+  displayName: string;
+  startDate?: string | null;
+  endDate?: string | null;
+};
+
+type TeamDetailData = Team & {
+  season: string;
+  seasonLabel: string;
+  seasonRecord?: string | null;
+  seasons: TeamSeasonOption[];
   schedule: TeamScheduleGame[];
   roster: TeamRosterPlayer[];
-}
+};
 
-interface PredictionData {
+type PredictionData = {
   homeWinProb: number;
   awayWinProb: number;
+};
+
+type PredictionCacheEntry = {
+  fetchedAt: number;
+  fingerprint: string;
+  data: PredictionData | null;
+};
+
+const TEAM_DETAIL_PREDICTION_CACHE_STORAGE_KEY = "sportsync_team_detail_prediction_cache_v2";
+const TEAM_DETAIL_QUERY_VERSION = "v3";
+
+function readSessionJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSessionJson<T>(key: string, value: T): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures and keep rendering.
+  }
+}
+
+function getInitials(name: string, fallback = "", limit = 2): string {
+  const source = [name, fallback]
+    .map((value) => String(value || "").trim())
+    .find(Boolean) || "";
+  if (!source) return "";
+
+  const parts = source
+    .replace(/[^A-Za-z0-9\s-]+/g, " ")
+    .split(/[\s-]+/)
+    .filter(Boolean);
+
+  if (parts.length >= 2) {
+    return parts
+      .slice(0, limit)
+      .map((part) => part[0]?.toUpperCase() || "")
+      .join("");
+  }
+
+  return source.replace(/[^A-Za-z0-9]+/g, "").slice(0, limit).toUpperCase();
+}
+
+function getPredictionCacheFingerprint(game: TeamScheduleGame): string {
+  return [
+    game.status,
+    game.statusDetail ?? "",
+    String(game.homeScore ?? 0),
+    String(game.awayScore ?? 0),
+    game.scheduledAt,
+  ].join("|");
+}
+
+function getPredictionCacheTtlMs(game: TeamScheduleGame): number {
+  if (game.status === "live") return 15000;
+  if (game.status === "final") return 6 * 60 * 60 * 1000;
+  return 15 * 60 * 1000;
 }
 
 function normalizeTeam(raw: Record<string, unknown>): Team {
@@ -124,9 +198,27 @@ function normalizeRosterPlayer(raw: Record<string, unknown>): TeamRosterPlayer {
   };
 }
 
+function normalizeSeasonOption(raw: Record<string, unknown>): TeamSeasonOption {
+  const year = String(raw.year ?? "").trim();
+  return {
+    year,
+    displayName: String(raw.display_name ?? raw.displayName ?? year).trim() || year,
+    startDate: raw.start_date ? String(raw.start_date) : null,
+    endDate: raw.end_date ? String(raw.end_date) : null,
+  };
+}
+
 function normalizeTeamDetail(raw: Record<string, unknown>): TeamDetailData {
   return {
     ...normalizeTeam(raw),
+    season: String(raw.season ?? ""),
+    seasonLabel: String(raw.season_label ?? raw.seasonLabel ?? raw.season ?? ""),
+    seasonRecord: raw.season_record ? String(raw.season_record) : raw.record ? String(raw.record) : null,
+    seasons: Array.isArray(raw.seasons)
+      ? raw.seasons
+          .map((item) => normalizeSeasonOption(item as Record<string, unknown>))
+          .filter((season) => season.year)
+      : [],
     schedule: Array.isArray(raw.schedule)
       ? raw.schedule.map((item) => normalizeScheduleGame(item as Record<string, unknown>))
       : [],
@@ -149,24 +241,240 @@ function chartLabelForLeague(league: string) {
   return "Points";
 }
 
+async function fetchTeamDetail(slug: string, season?: string): Promise<TeamDetailData> {
+  const config = season ? { params: { season } } : undefined;
+
+  try {
+    const response = await apiClient.get(`${API.TEAMS}/slug/${slug}`, config);
+    return normalizeTeamDetail(response.data as Record<string, unknown>);
+  } catch {
+    const response = await apiClient.get(`${API.TEAMS}/${slug}`, config);
+    return normalizeTeamDetail(response.data as Record<string, unknown>);
+  }
+}
+
+function formatGameDateLabel(value: string): string {
+  const gameDate = new Date(value);
+  if (Number.isNaN(gameDate.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(gameDate);
+}
+
+function slugifySegment(value?: string): string {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+function buildGameSlug(game: TeamScheduleGame): string {
+  return `${slugifySegment(game.league)}-${slugifySegment(game.awayTeam.name)}-${slugifySegment(game.homeTeam.name)}-${game.id}`;
+}
+
+function RecentPulseCard({ game }: { game: TeamScheduleGame }) {
+  const playedOn = formatGameDateLabel(game.scheduledAt);
+  const statusLabel = game.statusDetail?.trim() || "FINAL";
+
+  return (
+    <Link
+      to={`/games/${buildGameSlug(game)}`}
+      className="block rounded-[1.75rem] border border-muted/20 bg-background/55 px-6 py-5 transition-all hover:border-accent/30"
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium uppercase tracking-[0.2em] text-muted">
+            {game.league}
+          </span>
+          {playedOn ? (
+            <span className="rounded-full border border-muted/15 bg-surface/80 px-2.5 py-1 text-[11px] font-medium text-muted">
+              {playedOn}
+            </span>
+          ) : null}
+        </div>
+        <span className="text-xs font-medium uppercase tracking-[0.16em] text-muted">
+          {statusLabel}
+        </span>
+      </div>
+
+      <div className="space-y-4">
+        {[
+          {
+            team: game.awayTeam,
+            score: game.awayScore,
+            isWinning: game.awayScore > game.homeScore,
+          },
+          {
+            team: game.homeTeam,
+            score: game.homeScore,
+            isWinning: game.homeScore > game.awayScore,
+          },
+        ].map(({ team, score, isWinning }) => (
+          <div key={`${game.id}-${team.name}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              {team.logoUrl ? (
+                <img
+                  src={team.logoUrl}
+                  alt={team.name}
+                  className="h-8 w-8 shrink-0 object-contain img-fade-in"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="h-8 w-8 shrink-0 rounded-full bg-muted/20" />
+              )}
+              <div className="min-w-0">
+                <p
+                  className={`truncate text-[1.05rem] ${
+                    isWinning ? "font-semibold text-foreground" : "font-medium text-foreground-base"
+                  }`}
+                >
+                  {team.name}
+                </p>
+                {team.city ? (
+                  <p className="truncate text-xs text-muted">{team.city}</p>
+                ) : null}
+              </div>
+            </div>
+
+            <span
+              className={`text-[2rem] leading-none tabular-nums ${
+                isWinning ? "font-semibold text-foreground" : "font-medium text-foreground-base"
+              }`}
+            >
+              {score}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Link>
+  );
+}
+
+function TeamSeasonSelector({
+  seasonOptions,
+  selectedSeason,
+  activeSeason,
+  seasonLabel,
+  recordLabel,
+  onSeasonChange,
+}: {
+  seasonOptions: TeamSeasonOption[];
+  selectedSeason: string;
+  activeSeason: string;
+  seasonLabel: string;
+  recordLabel?: string | null;
+  onSeasonChange: (season: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [isOpen]);
+
+  const effectiveSeason = selectedSeason || activeSeason || seasonOptions[0]?.year || "";
+  const activeSeasonLabel =
+    seasonOptions.find((option) => option.year === effectiveSeason)?.displayName ||
+    seasonLabel ||
+    effectiveSeason ||
+    "Current";
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-3">
+      {recordLabel ? (
+        <span className="rounded-full border border-accent/20 bg-accent/10 px-3.5 py-2 text-sm font-semibold text-accent">
+          {recordLabel}
+        </span>
+      ) : null}
+
+      {seasonOptions.length > 0 ? (
+        <div ref={menuRef} className="relative" onClick={(event) => event.stopPropagation()}>
+          <button
+            type="button"
+            onClick={() => setIsOpen((current) => !current)}
+            className="inline-flex min-w-[10.5rem] items-center justify-between gap-3 rounded-full border border-muted/15 bg-background/60 px-4 py-2 text-sm font-medium text-foreground outline-none transition-colors hover:border-accent/30 focus:border-accent/50"
+          >
+            <span>{activeSeasonLabel}</span>
+            <FiChevronDown className={`h-4 w-4 text-muted transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {isOpen ? (
+            <div className="surface-elevated-flyout absolute right-0 top-[calc(100%+0.6rem)] z-20 w-52 overflow-hidden rounded-3xl border border-muted/15 bg-surface">
+              <div className="max-h-72 overflow-y-auto py-2">
+                {seasonOptions.map((seasonOption) => {
+                  const isSelected = seasonOption.year === effectiveSeason;
+                  return (
+                    <button
+                      key={seasonOption.year}
+                      type="button"
+                      onClick={() => {
+                        onSeasonChange(seasonOption.year);
+                        setIsOpen(false);
+                      }}
+                      className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm transition-colors ${
+                        isSelected ? "bg-accent text-foreground" : "text-foreground-base hover:bg-background/60"
+                      }`}
+                    >
+                      <span>{seasonOption.displayName}</span>
+                      {isSelected ? <span className="text-base leading-none">✓</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function TeamDetail() {
   const { id: slug } = useParams<{ id: string }>();
   const [activeTab, setActiveTab] = useState<TeamTab>("overview");
+  const [selectedSeason, setSelectedSeason] = useState("");
+  const predictionCacheRef = useRef<Record<string, PredictionCacheEntry>>(
+    readSessionJson<Record<string, PredictionCacheEntry>>(TEAM_DETAIL_PREDICTION_CACHE_STORAGE_KEY, {}),
+  );
+  const [predictionByGameId, setPredictionByGameId] = useState<Record<string, PredictionData | null>>({});
+  const [predictionsLoadingIds, setPredictionsLoadingIds] = useState<Set<string>>(new Set());
 
-  const { data: team, isLoading } = useQuery<TeamDetailData>({
-    queryKey: ["team", slug],
-    queryFn: async () => {
-      // Try slug-based lookup first, fall back to UUID
-      try {
-        const response = await apiClient.get(`${API.TEAMS}/slug/${slug}`);
-        return normalizeTeamDetail(response.data as Record<string, unknown>);
-      } catch {
-        // Fall back to UUID lookup for backward compatibility
-        const response = await apiClient.get(`${API.TEAMS}/${slug}`);
-        return normalizeTeamDetail(response.data as Record<string, unknown>);
-      }
-    },
+  useEffect(() => {
+    setSelectedSeason("");
+  }, [slug]);
+
+  const { data: baseTeam, isLoading: isBaseTeamLoading } = useQuery<TeamDetailData>({
+    queryKey: [TEAM_DETAIL_QUERY_VERSION, "team", slug],
+    queryFn: () => fetchTeamDetail(slug || ""),
     enabled: Boolean(slug),
+    staleTime: 300000,
+  });
+
+  const {
+    data: selectedSeasonTeam,
+    isLoading: isSelectedSeasonLoading,
+    isFetching: isSelectedSeasonFetching,
+  } = useQuery<TeamDetailData>({
+    queryKey: [TEAM_DETAIL_QUERY_VERSION, "teamSeason", slug, selectedSeason],
+    queryFn: () => fetchTeamDetail(slug || "", selectedSeason),
+    enabled: Boolean(slug && selectedSeason),
     staleTime: 300000,
   });
 
@@ -176,18 +484,32 @@ export default function TeamDetail() {
       const response = await apiClient.get(API.USER_TEAMS);
       return (response.data as Record<string, unknown>[]).map(normalizeTeam);
     },
+    staleTime: 300000,
   });
 
+  const team = baseTeam ?? selectedSeasonTeam ?? null;
+  const seasonView = selectedSeason ? selectedSeasonTeam ?? null : baseTeam ?? null;
+  const seasonOptions = baseTeam?.seasons || selectedSeasonTeam?.seasons || [];
   const teamId = team?.id;
+  const activeSeason = selectedSeason || seasonView?.season || seasonOptions[0]?.year || "";
+  const activeSeasonLabel =
+    seasonOptions.find((option) => option.year === activeSeason)?.displayName ||
+    seasonView?.seasonLabel ||
+    activeSeason ||
+    "Current Season";
+  const activeSeasonRecord = selectedSeason
+    ? seasonView?.seasonRecord || seasonView?.record || null
+    : baseTeam?.seasonRecord || baseTeam?.record || null;
+  const isSeasonContentLoading = Boolean(selectedSeason) && !seasonView && isSelectedSeasonLoading;
+  const isSeasonContentRefreshing = Boolean(selectedSeason) && isSelectedSeasonFetching;
 
   const schedule = useMemo(() => {
-    if (!team) return [];
-    return [...team.schedule].sort(
+    if (!seasonView) return [];
+    return [...seasonView.schedule].sort(
       (left, right) => new Date(left.scheduledAt).getTime() - new Date(right.scheduledAt).getTime(),
     );
-  }, [team]);
+  }, [seasonView]);
 
-  const now = Date.now();
   const recentResults = useMemo(
     () =>
       schedule
@@ -197,8 +519,9 @@ export default function TeamDetail() {
     [schedule],
   );
   const upcomingGames = useMemo(
-    () =>
-      schedule
+    () => {
+      const now = Date.now();
+      return schedule
         .filter((game) => {
           if (game.status === "final") {
             return false;
@@ -206,43 +529,179 @@ export default function TeamDetail() {
           const gameTime = new Date(game.scheduledAt).getTime();
           return Number.isNaN(gameTime) ? true : gameTime >= now - 60_000;
         })
-        .slice(0, 5),
-    [now, schedule],
-  );
-
-  const predictionQueries = useQueries({
-    queries: upcomingGames.map((game) => ({
-      queryKey: ["prediction", game.id, team?.league],
-      queryFn: async () => {
-        const response = await apiClient.get(`${API.PREDICT}/${game.id}`, {
-          params: { league: team?.league },
-        });
-        return normalizePrediction(response.data as Record<string, unknown>);
-      },
-      enabled: Boolean(team?.league && game.id),
-      staleTime: 60000,
-    })),
-  });
-
-  const predictionByGameId = useMemo(() => {
-    const mapped = new Map<string, PredictionData>();
-    upcomingGames.forEach((game, index) => {
-      const prediction = predictionQueries[index]?.data;
-      if (prediction) {
-        mapped.set(game.id, prediction);
-      }
-    });
-    return mapped;
-  }, [predictionQueries, upcomingGames]);
-
-  const chartGames = useMemo(
-    () => schedule.filter((game) => game.status === "final").slice(-10),
+        .slice(0, 5);
+    },
     [schedule],
   );
 
+  const persistPredictionCache = useCallback(() => {
+    writeSessionJson(TEAM_DETAIL_PREDICTION_CACHE_STORAGE_KEY, predictionCacheRef.current);
+  }, []);
+
+  const setPredictionCacheEntry = useCallback(
+    (gameId: string, entry: PredictionCacheEntry) => {
+      predictionCacheRef.current[gameId] = entry;
+      persistPredictionCache();
+    },
+    [persistPredictionCache],
+  );
+
+  useEffect(() => {
+    if (!team?.league || upcomingGames.length === 0) {
+      setPredictionByGameId({});
+      setPredictionsLoadingIds(new Set());
+      return;
+    }
+
+    const predictionLeague = team.league;
+    const now = Date.now();
+    const warmPredictions: Record<string, PredictionData | null> = {};
+    const gamesToFetch: TeamScheduleGame[] = [];
+
+    for (const game of upcomingGames) {
+      const cached = predictionCacheRef.current[game.id];
+      const fingerprint = getPredictionCacheFingerprint(game);
+      const cacheTtl = cached?.data ? getPredictionCacheTtlMs(game) : 30000;
+      const sameSnapshot = cached && cached.fingerprint === fingerprint;
+      if (sameSnapshot && cached.data) {
+        warmPredictions[game.id] = cached.data;
+      }
+      if (!sameSnapshot || now - (cached?.fetchedAt ?? 0) >= cacheTtl) {
+        gamesToFetch.push(game);
+      }
+    }
+
+    setPredictionByGameId(warmPredictions);
+    setPredictionsLoadingIds(new Set(gamesToFetch.map((game) => game.id)));
+
+    if (!gamesToFetch.length) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const clearLoadingIds = (gameIds: string[]) => {
+      setPredictionsLoadingIds((prev) => {
+        if (!prev.size) return prev;
+        const next = new Set(prev);
+        gameIds.forEach((gameId) => next.delete(gameId));
+        return next;
+      });
+    };
+
+    const PREDICTION_CHUNK_SIZE = 4;
+
+    const fetchBatch = async (games: TeamScheduleGame[]) => {
+      if (!games.length) {
+        return new Set<string>();
+      }
+      try {
+        const leagueMap: Record<string, string> = {};
+        games.forEach((game) => {
+          leagueMap[game.id] = predictionLeague;
+        });
+        const response = await apiClient.post(
+          API.PREDICT_BATCH,
+          {
+            game_ids: games.map((game) => game.id),
+            leagues: leagueMap,
+          },
+          {
+            signal: controller.signal,
+            timeout: 20_000,
+          },
+        );
+        if (controller.signal.aborted) {
+          return new Set<string>();
+        }
+
+        const predictions = response.data?.predictions || {};
+        const fetchedGameIds = new Set<string>();
+        const updates: Record<string, PredictionData | null> = {};
+
+        for (const [gameId, data] of Object.entries(predictions)) {
+          if (!data) continue;
+          const game = games.find((entry) => entry.id === gameId);
+          if (!game) continue;
+          const prediction = normalizePrediction(data as Record<string, unknown>);
+          updates[gameId] = prediction;
+          setPredictionCacheEntry(gameId, {
+            fetchedAt: Date.now(),
+            fingerprint: getPredictionCacheFingerprint(game),
+            data: prediction,
+          });
+          fetchedGameIds.add(gameId);
+        }
+
+        if (Object.keys(updates).length) {
+          setPredictionByGameId((prev) => ({ ...prev, ...updates }));
+        }
+
+        return fetchedGameIds;
+      } catch {
+        return new Set<string>();
+      }
+    };
+
+    const fetchQueued = async (games: TeamScheduleGame[]) => {
+      for (let index = 0; index < games.length; index += PREDICTION_CHUNK_SIZE) {
+        if (controller.signal.aborted) return;
+        const chunk = games.slice(index, index + PREDICTION_CHUNK_SIZE);
+        const fetchedIds = await fetchBatch(chunk);
+        if (controller.signal.aborted) return;
+        const remainingChunk = chunk.filter((game) => !fetchedIds.has(game.id));
+        const results = await Promise.allSettled(
+          remainingChunk.map(async (game) => {
+            const response = await apiClient.get(`${API.PREDICT}/${game.id}`, {
+              params: { league: predictionLeague },
+              signal: controller.signal,
+            });
+            return {
+              game,
+              prediction: normalizePrediction(response.data as Record<string, unknown>),
+            };
+          }),
+        );
+        if (controller.signal.aborted) return;
+
+        const updates: Record<string, PredictionData | null> = {};
+        results.forEach((result, chunkIndex) => {
+          const game = remainingChunk[chunkIndex];
+          if (!game) return;
+          if (result.status === "fulfilled") {
+            updates[game.id] = result.value.prediction;
+            setPredictionCacheEntry(game.id, {
+              fetchedAt: Date.now(),
+              fingerprint: getPredictionCacheFingerprint(game),
+              data: result.value.prediction,
+            });
+          } else {
+            setPredictionCacheEntry(game.id, {
+              fetchedAt: Date.now(),
+              fingerprint: getPredictionCacheFingerprint(game),
+              data: null,
+            });
+          }
+        });
+
+        if (Object.keys(updates).length) {
+          setPredictionByGameId((prev) => ({ ...prev, ...updates }));
+        }
+
+        clearLoadingIds(chunk.map((game) => game.id));
+      }
+    };
+
+    void fetchQueued(gamesToFetch);
+
+    return () => controller.abort();
+  }, [setPredictionCacheEntry, team?.league, upcomingGames]);
+
+  const chartGames = useMemo(() => schedule.filter((game) => game.status === "final").slice(-10), [schedule]);
+
   const scoringLabel = chartLabelForLeague(team?.league || "");
   const offenseTrend = useMemo(() => {
-    if (!team) return [];
+    if (!team || !seasonView) return [];
     return chartGames.map((game) => {
       const isHome = game.homeTeam.id === team.id;
       const scored = isHome ? game.homeScore : game.awayScore;
@@ -251,7 +710,7 @@ export default function TeamDetail() {
       const label = `${stamp.getMonth() + 1}/${stamp.getDate()}`;
       return { label, scored, allowed };
     });
-  }, [chartGames, team]);
+  }, [chartGames, seasonView, team]);
 
   const averages = useMemo(() => {
     if (!offenseTrend.length) return [];
@@ -266,7 +725,7 @@ export default function TeamDetail() {
   }, [offenseTrend]);
 
   const winTrend = useMemo(() => {
-    if (!team) return [];
+    if (!team || !seasonView) return [];
     return chartGames.map((game) => {
       const isHome = game.homeTeam.id === team.id;
       const scored = isHome ? game.homeScore : game.awayScore;
@@ -280,16 +739,16 @@ export default function TeamDetail() {
         allowed,
       };
     });
-  }, [chartGames, team]);
+  }, [chartGames, seasonView, team]);
 
   const isFollowing = savedTeams.some((savedTeam) => savedTeam.id === teamId);
   const accent = team?.color?.startsWith("#")
     ? team.color
     : team?.color
       ? `#${team.color}`
-      : "#2E8EFF";
+      : "var(--accent)";
 
-  if (isLoading || !team) {
+  if ((isBaseTeamLoading && !team) || !team) {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
@@ -332,11 +791,11 @@ export default function TeamDetail() {
       <Navbar />
 
       <main className="mx-auto max-w-7xl px-4 py-8">
-        <section className="overflow-hidden rounded-[2rem] border border-muted/15 bg-surface shadow-[0_24px_64px_rgba(5,10,25,0.24)]">
+        <section className="surface-elevated-strong overflow-hidden rounded-[2rem] border border-muted/15 bg-surface">
           <div
             className="relative px-6 py-8"
             style={{
-              background: `radial-gradient(circle at top right, ${accent}22 0%, rgba(10,14,30,0) 38%), linear-gradient(180deg, rgba(11,17,32,0.96) 0%, rgba(13,19,37,0.92) 100%)`,
+              background: `radial-gradient(circle at top right, color-mix(in srgb, ${accent} 13%, transparent) 0%, transparent 38%), linear-gradient(180deg, var(--highlight-feature-image-overlay) 0%, var(--panel-team-hero-bottom) 100%)`,
             }}
           >
             <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
@@ -344,7 +803,7 @@ export default function TeamDetail() {
                 <SafeAvatar
                   src={team.logoUrl}
                   alt={team.name}
-                  className="flex h-24 w-24 items-center justify-center rounded-[1.75rem] border border-accent/20 bg-background/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+                  className="flex h-24 w-24 items-center justify-center rounded-[1.75rem] border border-accent/20 bg-background/80 shadow-[inset_0_1px_0_var(--overlay-white-hairline)]"
                   imgClassName="h-16 w-16 object-contain"
                   loadingContent={<div className="h-16 w-16 animate-pulse rounded-2xl bg-accent/10" />}
                   fallback={
@@ -388,7 +847,7 @@ export default function TeamDetail() {
                   onClick={() => setActiveTab(tab.id)}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
                     activeTab === tab.id
-                      ? "bg-accent text-foreground shadow-[0_14px_30px_rgba(46,142,255,0.18)]"
+                      ? "surface-accent-choice-strong bg-accent text-foreground"
                       : "border border-muted/15 bg-background/70 text-muted hover:border-accent/30 hover:text-foreground"
                   }`}
                 >
@@ -402,7 +861,7 @@ export default function TeamDetail() {
         <div key={activeTab} className="tab-content-enter">
 
         {activeTab === "overview" ? (
-          <section className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+          <section className="mt-8 grid gap-6 xl:grid-cols-[1.18fr_0.82fr]">
             <div className="rounded-[2rem] border border-muted/15 bg-surface p-6">
               <div className="mb-4 flex items-center gap-3">
                 <FiTrendingUp className="h-5 w-5 text-accent" />
@@ -417,30 +876,9 @@ export default function TeamDetail() {
                   No completed games are available yet.
                 </div>
               ) : (
-                <div className="grid gap-4">
+                <div className="grid auto-rows-fr gap-4">
                   {recentResults.map((game) => (
-                    <ScoreCard
-                      key={game.id}
-                      id={game.id}
-                      homeTeam={{
-                        name: game.homeTeam.name,
-                        shortName: game.homeTeam.shortName ?? undefined,
-                        logoUrl: game.homeTeam.logoUrl ?? undefined,
-                        color: game.homeTeam.color ?? undefined,
-                      }}
-                      awayTeam={{
-                        name: game.awayTeam.name,
-                        shortName: game.awayTeam.shortName ?? undefined,
-                        logoUrl: game.awayTeam.logoUrl ?? undefined,
-                        color: game.awayTeam.color ?? undefined,
-                      }}
-                      homeScore={game.homeScore}
-                      awayScore={game.awayScore}
-                      status={game.status}
-                      statusDetail={game.statusDetail ?? undefined}
-                      league={game.league}
-                      scheduledAt={game.scheduledAt}
-                    />
+                    <RecentPulseCard key={game.id} game={game} />
                   ))}
                 </div>
               )}
@@ -462,7 +900,7 @@ export default function TeamDetail() {
                   Upcoming games are not available from the source feed right now.
                 </div>
               ) : (
-                <div className="grid gap-4">
+                <div className="grid auto-rows-fr gap-4">
                   {upcomingGames.map((game) => (
                     <ScoreCard
                       key={game.id}
@@ -485,7 +923,8 @@ export default function TeamDetail() {
                       statusDetail={game.statusDetail ?? undefined}
                       league={game.league}
                       scheduledAt={game.scheduledAt}
-                      prediction={predictionByGameId.get(game.id) ?? null}
+                      prediction={predictionByGameId[game.id] ?? null}
+                      predictionLoading={predictionsLoadingIds.has(game.id)}
                     />
                   ))}
                 </div>
@@ -496,15 +935,37 @@ export default function TeamDetail() {
 
         {activeTab === "schedule" ? (
           <section className="mt-8 rounded-[2rem] border border-muted/15 bg-surface p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <FiCalendar className="h-5 w-5 text-accent" />
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">Full Season Schedule</h2>
-                <p className="text-sm text-muted">Everything we can currently see for this team’s season path.</p>
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-center gap-3">
+                <FiCalendar className="h-5 w-5 text-accent" />
+                <div>
+                  <h2 className="text-xl font-semibold text-foreground">Full Season Schedule</h2>
+                  <p className="text-sm text-muted">Everything we can currently see for {activeSeasonLabel}.</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {isSeasonContentRefreshing ? (
+                  <span className="text-xs font-medium text-muted">Updating season...</span>
+                ) : null}
+                <TeamSeasonSelector
+                  seasonOptions={seasonOptions}
+                  selectedSeason={selectedSeason}
+                  activeSeason={activeSeason}
+                  seasonLabel={activeSeasonLabel}
+                  recordLabel={activeSeasonRecord}
+                  onSeasonChange={setSelectedSeason}
+                />
               </div>
             </div>
 
-            {schedule.length === 0 ? (
+            {isSeasonContentLoading ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {[1, 2, 3, 4].map((item) => (
+                  <div key={item} className="h-44 rounded-xl skeleton-pulse" />
+                ))}
+              </div>
+            ) : schedule.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-muted/20 bg-background/60 px-6 py-10 text-center text-sm text-muted">
                 Schedule data is not available yet.
               </div>
@@ -541,21 +1002,49 @@ export default function TeamDetail() {
 
         {activeTab === "roster" ? (
           <section className="mt-8 rounded-[2rem] border border-muted/15 bg-surface p-6">
-            <div className="mb-4 flex items-center gap-3">
-              <FiUsers className="h-5 w-5 text-accent" />
-              <div>
-                <h2 className="text-xl font-semibold text-foreground">Roster</h2>
-                <p className="text-sm text-muted">Key bio and sport-specific info for the current squad.</p>
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="flex items-center gap-3">
+                <FiUsers className="h-5 w-5 text-accent" />
+                <div>
+                  <h2 className="text-xl font-semibold text-foreground">Roster</h2>
+                  <p className="text-sm text-muted">Key bio and sport-specific info for the selected squad.</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {isSeasonContentRefreshing ? (
+                  <span className="text-xs font-medium text-muted">Updating roster...</span>
+                ) : null}
+                <TeamSeasonSelector
+                  seasonOptions={seasonOptions}
+                  selectedSeason={selectedSeason}
+                  activeSeason={activeSeason}
+                  seasonLabel={activeSeasonLabel}
+                  onSeasonChange={setSelectedSeason}
+                />
               </div>
             </div>
 
-            {team.roster.length === 0 ? (
+            {isSeasonContentLoading ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((item) => (
+                  <div key={item} className="overflow-hidden rounded-3xl border border-muted/15 bg-background/60">
+                    <div className="h-36 skeleton-pulse" />
+                    <div className="space-y-3 px-4 py-4">
+                      <div className="mx-auto h-5 w-24 skeleton-pulse" />
+                      <div className="mx-auto h-4 w-20 skeleton-pulse" />
+                      <div className="mx-auto h-4 w-28 rounded-full skeleton-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : seasonView?.roster.length === 0 ? (
               <div className="rounded-3xl border border-dashed border-muted/20 bg-background/60 px-6 py-10 text-center text-sm text-muted">
                 Roster data is not available yet.
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {team.roster.map((player, i) => (
+                {seasonView?.roster.map((player, i) => (
                   <div
                     key={player.id || player.name}
                     className="rounded-3xl border border-muted/15 bg-background/60 overflow-hidden box-row-enter"
@@ -571,7 +1060,7 @@ export default function TeamDetail() {
                         loadingContent={<div className="h-28 w-28 animate-pulse rounded-full bg-accent/10" />}
                         fallback={
                           <span className="text-2xl font-semibold tracking-[0.18em] text-accent/70">
-                            {(player.shortName || player.name).slice(0, 2).toUpperCase()}
+                            {getInitials(player.name, player.shortName)}
                           </span>
                         }
                       />
@@ -622,7 +1111,7 @@ export default function TeamDetail() {
               xKey="label"
               series={[
                 { dataKey: "scored", color: accent, name: `${scoringLabel} scored` },
-                { dataKey: "allowed", color: "#94A3B8", name: `${scoringLabel} allowed` },
+                { dataKey: "allowed", color: "var(--chart-axis)", name: `${scoringLabel} allowed` },
               ]}
             />
 
@@ -653,8 +1142,8 @@ export default function TeamDetail() {
                         <div
                           className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
                             g.won
-                              ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-400"
-                              : "bg-red-500/20 border-red-500/50 text-red-400"
+                              ? "surface-success-card"
+                              : "surface-error-card"
                           }`}
                         >
                           {g.won ? "W" : "L"}
@@ -673,7 +1162,7 @@ export default function TeamDetail() {
                         className="h-full transition-all duration-300"
                         style={{
                           width: `${100 / winTrend.length}%`,
-                          backgroundColor: g.won ? "#10b981" : "#ef4444",
+                          backgroundColor: g.won ? "var(--success-strong)" : "var(--danger-strong)",
                           opacity: 0.7 + (i / winTrend.length) * 0.3,
                         }}
                       />

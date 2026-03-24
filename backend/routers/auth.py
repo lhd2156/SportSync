@@ -6,13 +6,15 @@ All business logic delegated to auth_service. This file only handles
 HTTP concerns: request parsing, response formatting, and cookie setting.
 """
 import logging
-import secrets
+import time
 from datetime import date, datetime
+from urllib.parse import quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from config import settings
 from database import get_db
 from dependencies import get_current_user
 from models.user import User
@@ -28,16 +30,27 @@ from schemas.auth import (
     SetPasswordRequest,
     ChangePasswordRequest,
     PasswordResetRequest,
+    PasswordResetConfirmRequest,
     TokenRefreshResponse,
+)
+from schemas.common import (
+    DetailResponse,
+    OnboardingCompleteResponse,
+    PasswordResetResponse,
+    ValidResponse,
 )
 from services.auth_service import (
     hash_password,
     verify_password,
     create_access_token,
     create_refresh_token,
+    create_password_reset_token,
     decode_token,
     generate_session_token,
     check_account_locked,
+    clear_expired_account_lock,
+    get_account_lockout_remaining_seconds,
+    format_lockout_duration,
     record_failed_login,
     reset_failed_logins,
     store_session_in_redis,
@@ -47,9 +60,14 @@ from services.auth_service import (
 )
 from services.security_service import check_rate_limit, check_subject_rate_limit
 from services.cache_service import redis_client
+from services.profile_validation import (
+    is_valid_person_name,
+    normalize_display_handle,
+    sanitize_display_handle_candidate,
+)
 from constants import (
+    CACHE_TTL_SESSION,
     MINIMUM_AGE_YEARS,
-    RATE_LIMIT_PASSWORD_RESET_WINDOW,
     REDIS_PREFIX_PASSWORD_RESET,
 )
 
@@ -58,6 +76,7 @@ logger = logging.getLogger(__name__)
 GENERIC_PASSWORD_RESET_MESSAGE = (
     "If an account exists for that email, reset instructions will be sent."
 )
+_local_used_password_reset_tokens: dict[str, int] = {}
 
 
 def _normalize_email(email: str | None) -> str:
@@ -67,7 +86,7 @@ def _normalize_email(email: str | None) -> str:
 
 def _normalize_display_name(display_name: str | None) -> str:
     """Trim display handles before comparing or storing them."""
-    return str(display_name or "").strip()
+    return normalize_display_handle(display_name)
 
 
 def _find_user_by_email(db: Session, email: str | None) -> User | None:
@@ -107,8 +126,8 @@ def _generate_unique_display_name(
     fallback_seed: str | None,
 ) -> str:
     """Generate a unique handle for OAuth users when Google data collides."""
-    normalized_preferred = _normalize_display_name(preferred_display_name)
-    normalized_seed = _normalize_display_name(fallback_seed)
+    normalized_preferred = sanitize_display_handle_candidate(preferred_display_name)
+    normalized_seed = sanitize_display_handle_candidate(fallback_seed)
 
     for candidate in (normalized_preferred, normalized_seed):
         if candidate and not _find_user_by_display_name(db, candidate):
@@ -124,13 +143,14 @@ def _generate_unique_display_name(
 
 
 def _set_refresh_cookie(response: Response, token: str, max_age: int) -> None:
-    """Set the refresh token as an HTTP-only secure cookie."""
+    """Set the refresh token as an HTTP-only cookie."""
+    secure_cookie = settings.environment.lower() == "production"
     response.set_cookie(
         key="refresh_token",
         value=token,
         max_age=max_age,
         httponly=True,
-        secure=True,
+        secure=secure_cookie,
         samesite="strict",
         path="/",
     )
@@ -149,6 +169,97 @@ def _calculate_age(dob: date) -> int:
     if (today.month, today.day) < (dob.month, dob.day):
         age -= 1
     return age
+
+
+def _resolve_frontend_origin(request: Request) -> str:
+    """Pick the safest frontend origin available for reset links."""
+    allowed_origins = set(settings.redirect_allowlist_list)
+    candidate_origins = [
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+        *settings.redirect_allowlist_list,
+        settings.production_domain,
+    ]
+
+    for candidate in candidate_origins:
+        if not candidate:
+            continue
+        try:
+            normalized = settings._normalize_origin(candidate)
+            if normalized in allowed_origins:
+                return normalized
+        except Exception:
+            continue
+
+    if settings.production_domain.strip():
+        try:
+            normalized_production = settings._normalize_origin(settings.production_domain)
+            if normalized_production in allowed_origins:
+                return normalized_production
+        except Exception:
+            pass
+
+    if allowed_origins:
+        return sorted(allowed_origins)[0]
+
+    logger.error("No allowed frontend origin configured for password reset links.")
+    raise HTTPException(
+        status_code=500,
+        detail="Password reset is temporarily unavailable.",
+    )
+
+
+def _build_password_reset_url(request: Request, token: str) -> str:
+    frontend_origin = _resolve_frontend_origin(request).rstrip("/")
+    return f"{frontend_origin}/reset-password?token={quote(token)}"
+
+
+def _prune_local_used_password_reset_tokens() -> None:
+    """Drop expired local token markers used when Redis is unavailable."""
+    now_ts = int(time.time())
+    expired = [
+        jti for jti, expires_at in _local_used_password_reset_tokens.items()
+        if expires_at <= now_ts
+    ]
+    for jti in expired:
+        _local_used_password_reset_tokens.pop(jti, None)
+
+
+def _get_password_reset_user(
+    db: Session,
+    token: str,
+    *,
+    require_unused: bool = True,
+) -> tuple[User, dict]:
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "password_reset":
+        raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
+
+    user_id = str(payload.get("sub") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
+
+    reset_jti = str(payload.get("jti") or "").strip()
+    if require_unused and reset_jti:
+        if redis_client:
+            used_key = f"{REDIS_PREFIX_PASSWORD_RESET}used:{reset_jti}"
+            try:
+                if redis_client.exists(used_key):
+                    raise HTTPException(status_code=400, detail="This reset link has already been used.")
+            except HTTPException:
+                raise
+            except Exception:
+                logger.exception("Failed to check password reset token usage for jti=%s", reset_jti)
+        else:
+            _prune_local_used_password_reset_tokens()
+            if reset_jti in _local_used_password_reset_tokens:
+                raise HTTPException(status_code=400, detail="This reset link has already been used.")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or expired.")
+
+    return user, payload
 
 
 # ──────────────────────────────────────────────────────────────
@@ -244,11 +355,25 @@ async def login(
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    clear_expired_account_lock(db, user)
+
     if check_account_locked(user):
-        raise HTTPException(status_code=423, detail="Account locked. Try again later.")
+        remaining_seconds = get_account_lockout_remaining_seconds(user)
+        remaining_duration = format_lockout_duration(remaining_seconds)
+        raise HTTPException(
+            status_code=423,
+            detail=f"Account locked. Please try again in {remaining_duration}.",
+        )
 
     if not verify_password(body.password, user.hashed_password):
         record_failed_login(db, user)
+        if check_account_locked(user):
+            remaining_seconds = get_account_lockout_remaining_seconds(user)
+            remaining_duration = format_lockout_duration(remaining_seconds)
+            raise HTTPException(
+                status_code=423,
+                detail=f"Account locked. Please try again in {remaining_duration}.",
+            )
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     reset_failed_logins(db, user)
@@ -262,12 +387,13 @@ async def login(
         session_token = generate_session_token()
         if redis_client:
             store_session_in_redis(redis_client, session_token, str(user.id))
+        secure_cookie = settings.environment.lower() == "production"
         response.set_cookie(
             key="session_token",
             value=session_token,
-            max_age=2592000,
+            max_age=CACHE_TTL_SESSION,
             httponly=True,
-            secure=True,
+            secure=secure_cookie,
             samesite="strict",
             path="/",
         )
@@ -312,14 +438,27 @@ async def google_auth(
         google_data = google_resp.json()
         email = _normalize_email(google_data.get("email", ""))
         google_id = google_data.get("sub")
-        google_display_name = _normalize_display_name(google_data.get("name") or "") or None
-        google_first_name = str(google_data.get("given_name") or "").strip() or None
-        google_last_name = str(google_data.get("family_name") or "").strip() or None
+        google_audience = str(google_data.get("aud") or "").strip()
+        email_verified = str(google_data.get("email_verified") or "").strip().lower()
+        google_display_name = sanitize_display_handle_candidate(google_data.get("name") or "") or None
+        raw_google_first_name = str(google_data.get("given_name") or "").strip() or None
+        raw_google_last_name = str(google_data.get("family_name") or "").strip() or None
+        google_first_name = raw_google_first_name if is_valid_person_name(raw_google_first_name) else None
+        google_last_name = raw_google_last_name if is_valid_person_name(raw_google_last_name) else None
         google_picture = str(google_data.get("picture") or "").strip() or None
 
         if not email or not google_id:
             logger.warning("Google token missing required email/sub fields")
             raise HTTPException(status_code=401, detail="Invalid Google token data")
+
+        configured_client_id = settings.google_client_id.strip()
+        if configured_client_id and google_audience != configured_client_id:
+            logger.warning("Google token audience mismatch for email=%s", email)
+            raise HTTPException(status_code=401, detail="Invalid Google token")
+
+        if email_verified not in {"true", "1"}:
+            logger.warning("Google token email not verified for email=%s", email)
+            raise HTTPException(status_code=401, detail="Invalid Google token")
 
         user = _find_user_by_email(db, email)
         is_new = False
@@ -400,7 +539,7 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token")
 
-    if redis_client and is_token_blacklisted(redis_client, refresh_token):
+    if is_token_blacklisted(redis_client, refresh_token):
         raise HTTPException(status_code=401, detail="Token revoked")
 
     payload = decode_token(refresh_token)
@@ -413,10 +552,9 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    if redis_client:
-        exp = int(payload.get("exp", 0) or 0)
-        remaining = max(int(exp - datetime.utcnow().timestamp()), 1)
-        blacklist_token(redis_client, refresh_token, remaining)
+    exp = int(payload.get("exp", 0) or 0)
+    remaining = max(int(exp - datetime.utcnow().timestamp()), 1)
+    blacklist_token(redis_client, refresh_token, remaining)
 
     new_access = create_access_token(str(user.id))
     new_refresh, max_age = create_refresh_token(str(user.id), remember_me=remember_me)
@@ -424,7 +562,7 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
     return TokenRefreshResponse(access_token=new_access)
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=DetailResponse)
 async def logout(request: Request, response: Response):
     """Clear all auth cookies and blacklist the current tokens in Redis."""
     refresh_token = request.cookies.get("refresh_token")
@@ -432,7 +570,7 @@ async def logout(request: Request, response: Response):
 
     if refresh_token:
         payload = decode_token(refresh_token)
-        if payload and redis_client:
+        if payload:
             exp = payload.get("exp", 0)
             remaining = max(int(exp - datetime.utcnow().timestamp()), 0)
             blacklist_token(redis_client, refresh_token, remaining)
@@ -444,7 +582,7 @@ async def logout(request: Request, response: Response):
     return {"detail": "Logged out"}
 
 
-@router.post("/password-reset")
+@router.post("/password-reset", response_model=PasswordResetResponse)
 async def request_password_reset(
     body: PasswordResetRequest,
     request: Request,
@@ -456,22 +594,18 @@ async def request_password_reset(
     """
     normalized_email = _normalize_email(body.email)
     client_ip = request.client.host if request.client else "unknown"
+    response_payload: dict[str, str] = {"detail": GENERIC_PASSWORD_RESET_MESSAGE}
 
     try:
         check_subject_rate_limit("password_reset", normalized_email)
         user = _find_user_by_email(db, normalized_email)
-        if user and redis_client:
-            reset_token = secrets.token_urlsafe(32)
-            redis_client.setex(
-                f"{REDIS_PREFIX_PASSWORD_RESET}token:{reset_token}",
-                RATE_LIMIT_PASSWORD_RESET_WINDOW,
-                str(user.id),
-            )
-        elif user:
-            logger.warning(
-                "Password reset requested for user_id=%s but Redis is unavailable",
-                user.id,
-            )
+        if user:
+            reset_token, _ = create_password_reset_token(str(user.id))
+            reset_url = _build_password_reset_url(request, reset_token)
+            logger.info("Password reset link generated for user_id=%s", user.id)
+            if settings.environment.lower() != "production":
+                response_payload["dev_reset_url"] = reset_url
+                response_payload["dev_reset_token"] = reset_token
     except Exception:
         logger.exception(
             "Password reset request failed for email=%s ip=%s",
@@ -479,7 +613,53 @@ async def request_password_reset(
             client_ip,
         )
 
-    return {"detail": GENERIC_PASSWORD_RESET_MESSAGE}
+    return response_payload
+
+
+@router.get("/password-reset/validate", response_model=ValidResponse)
+async def validate_password_reset_token(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """Check whether a password reset token is valid before showing the form."""
+    _get_password_reset_user(db, token, require_unused=True)
+    return {"valid": True}
+
+
+@router.post("/password-reset/confirm", response_model=DetailResponse)
+async def confirm_password_reset(
+    body: PasswordResetConfirmRequest,
+    db: Session = Depends(get_db),
+):
+    """Set a new password using a valid password reset token."""
+    if body.password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    user, payload = _get_password_reset_user(db, body.token, require_unused=True)
+    user.hashed_password = hash_password(body.password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
+
+    reset_jti = str(payload.get("jti") or "").strip()
+    if reset_jti:
+        try:
+            exp = payload.get("exp")
+            if isinstance(exp, (int, float)):
+                ttl_seconds = max(int(exp - datetime.utcnow().timestamp()), 1)
+                if redis_client:
+                    redis_client.setex(
+                        f"{REDIS_PREFIX_PASSWORD_RESET}used:{reset_jti}",
+                        ttl_seconds,
+                        "1",
+                    )
+                else:
+                    _prune_local_used_password_reset_tokens()
+                    _local_used_password_reset_tokens[reset_jti] = int(time.time()) + ttl_seconds
+        except Exception:
+            logger.exception("Failed to mark password reset token as used for jti=%s", reset_jti)
+
+    return {"detail": "Password reset successfully. Please sign in with your new password."}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -487,7 +667,7 @@ async def request_password_reset(
 # ──────────────────────────────────────────────────────────────
 
 
-@router.post("/onboarding/step-1")
+@router.post("/onboarding/step-1", response_model=DetailResponse)
 async def onboarding_step_1(
     body: OnboardingStep1Request,
     user: User = Depends(get_current_user),
@@ -526,7 +706,7 @@ async def onboarding_step_1(
     return {"detail": "Step 1 complete"}
 
 
-@router.post("/onboarding/step-2")
+@router.post("/onboarding/step-2", response_model=DetailResponse)
 async def onboarding_step_2(
     body: OnboardingStep2Request,
     user: User = Depends(get_current_user),
@@ -541,7 +721,7 @@ async def onboarding_step_2(
     return {"detail": "Step 2 complete"}
 
 
-@router.post("/onboarding/complete")
+@router.post("/onboarding/complete", response_model=OnboardingCompleteResponse)
 async def onboarding_complete(
     body: OnboardingCompleteRequest,
     user: User = Depends(get_current_user),
@@ -591,7 +771,7 @@ async def onboarding_complete(
     return {"detail": "Onboarding complete", "is_onboarded": True, "teams_saved": len(saved_team_ids)}
 
 
-@router.post("/set-password")
+@router.post("/set-password", response_model=DetailResponse)
 async def set_password(
     body: SetPasswordRequest,
     user: User = Depends(get_current_user),
@@ -614,7 +794,7 @@ async def set_password(
     return {"detail": "Password set successfully"}
 
 
-@router.post("/change-password")
+@router.post("/change-password", response_model=DetailResponse)
 async def change_password(
     body: ChangePasswordRequest,
     user: User = Depends(get_current_user),

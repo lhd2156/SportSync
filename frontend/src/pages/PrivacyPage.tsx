@@ -1,119 +1,212 @@
-/**
- * SportSync - Privacy Policy Page
- *
- * GDPR and privacy regulation compliant privacy policy.
- */
 import { Link } from "react-router-dom";
-import Footer from "../components/Footer";
-import Logo from "../components/Logo";
 import { ROUTES } from "../constants";
+import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
+
+const sectionLinks = [
+  { id: "information", label: "Information we collect" },
+  { id: "use", label: "How we use information" },
+  { id: "cookies", label: "Cookies and preferences" },
+  { id: "sharing", label: "Sharing and disclosures" },
+  { id: "security-retention", label: "Security and retention" },
+  { id: "rights", label: "Rights and choices" },
+  { id: "children", label: "Children's privacy" },
+  { id: "changes-contact", label: "Changes and contact" },
+];
+
+const relatedLinks = [
+  { label: "Terms of Service", to: ROUTES.TERMS },
+  { label: "Cookie Policy", to: ROUTES.COOKIES },
+  { label: "About SportSync", to: ROUTES.ABOUT },
+];
+
+const collectedData = [
+  {
+    title: "Account information",
+    description:
+      "Information such as email address, display name, optional profile data, and authentication-related account records.",
+  },
+  {
+    title: "Preferences and product choices",
+    description:
+      "Saved teams, selected sports, onboarding choices, and product settings that help personalize the experience.",
+  },
+  {
+    title: "Usage and device information",
+    description:
+      "Technical signals such as browser details, device attributes, request timestamps, IP-based security logs, and interaction patterns.",
+  },
+];
+
+const useCases = [
+  "Provide and maintain the product.",
+  "Personalize dashboards, saved-team views, and relevant sports content.",
+  "Authenticate users and secure accounts.",
+  "Operate security controls such as abuse detection, rate limiting, and account protection workflows.",
+  "Understand product usage at an aggregate level and improve performance, reliability, and usability.",
+];
+
+const rightsItems = [
+  "Access information we hold about you.",
+  "Correct inaccurate or incomplete account information.",
+  "Request deletion of your account and associated data, subject to legal or operational exceptions.",
+  "Request a portable copy of data where applicable law provides that right.",
+  "Adjust non-essential cookie preferences through in-product consent controls.",
+];
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground-base">
-      <header className="border-b border-muted/20 py-4 px-6">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Logo size="sm" />
-          <Link to={ROUTES.HOME} className="text-sm text-muted hover:text-foreground transition-colors">
-            ← Back to Home
-          </Link>
+    <StaticPageShell
+      eyebrow="Privacy"
+      title="Privacy Policy"
+      subtitle="This policy explains what information SportSync collects, how it is used, and the choices available to people who use the product."
+      lastUpdated="March 21, 2026"
+      metadata={[
+        { label: "Focus", value: "Transparency, product operation, and user choice" },
+        { label: "Covers", value: "Account data, usage data, cookies, and security records" },
+        { label: "Contact", value: "privacy@sportsync.app" },
+      ]}
+      sectionLinks={sectionLinks}
+      relatedLinks={relatedLinks}
+    >
+      <StaticPageSection
+        id="information"
+        title="Information we collect"
+        summary="Strong privacy pages lead with categories people can understand, rather than burying them in jargon."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          {collectedData.map((item) => (
+            <div
+              key={item.title}
+              className="rounded-2xl border border-muted/15 bg-background/35 p-5"
+            >
+              <h3 className="text-base font-semibold text-foreground">{item.title}</h3>
+              <p className="mt-3 text-sm leading-7 text-muted">{item.description}</p>
+            </div>
+          ))}
         </div>
-      </header>
+      </StaticPageSection>
 
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Privacy Policy</h1>
-        <p className="text-sm text-muted mb-8">Last updated: March 14, 2026</p>
-
-        <div className="space-y-8 text-sm leading-relaxed">
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">1. Information We Collect</h2>
-            <p className="mb-3">We collect information you directly provide:</p>
-            <ul className="list-disc pl-6 space-y-1">
-              <li><strong>Account Information:</strong> Email address, display name, date of birth, gender (optional), and profile picture</li>
-              <li><strong>Authentication Data:</strong> Hashed passwords (bcrypt, cost 12) and Google OAuth tokens. We never store plaintext passwords.</li>
-              <li><strong>Sport Preferences:</strong> Selected sports, saved teams, and onboarding choices</li>
-              <li><strong>Usage Data:</strong> Pages visited, features used, and interaction patterns</li>
-            </ul>
-            <p className="mt-3">We automatically collect:</p>
-            <ul className="list-disc pl-6 space-y-1">
-              <li><strong>Device Information:</strong> Browser type, operating system, screen resolution</li>
-              <li><strong>Network Data:</strong> IP address (used solely for rate limiting and security), request timestamps</li>
-              <li><strong>Cookies:</strong> Essential session cookies and optional analytics cookies (see our <Link to={ROUTES.COOKIES} className="text-accent hover:underline">Cookie Policy</Link>)</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">2. How We Use Your Information</h2>
-            <ul className="list-disc pl-6 space-y-1">
-              <li>Provide, maintain, and improve the Service</li>
-              <li>Personalize your sports feed based on saved teams and selected sports</li>
-              <li>Authenticate your identity and secure your account</li>
-              <li>Send you essential account notifications (password resets, security alerts)</li>
-              <li>Enforce our Terms of Service and prevent abuse (rate limiting, account lockout)</li>
-              <li>Generate anonymized, aggregate analytics to improve the Service</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">3. Data Storage and Security</h2>
-            <p className="mb-3">Your data is stored in PostgreSQL databases hosted on AWS (us-east-1 region). We implement the following security measures:</p>
-            <ul className="list-disc pl-6 space-y-1">
-              <li>Passwords are hashed with bcrypt (cost factor 12) and never stored in plaintext</li>
-              <li>JWTs are signed with HS256 and stored only in memory (never localStorage)</li>
-              <li>Refresh tokens are sent as HTTP-only, Secure, SameSite=strict cookies</li>
-              <li>All data in transit is encrypted via TLS 1.2+</li>
-              <li>Rate limiting protects against brute-force attacks (10 login attempts per 15 minutes)</li>
-              <li>Account lockout activates after 5 consecutive failed login attempts</li>
-              <li>Redis caches are ephemeral and do not persist sensitive user data</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">4. Data Sharing</h2>
-            <p>We do not sell, rent, or trade your personal information. We may share data with:</p>
-            <ul className="list-disc pl-6 space-y-1 mt-2">
-              <li><strong>Service Providers:</strong> AWS (hosting), Google (OAuth authentication), TheSportsDB (sports data)</li>
-              <li><strong>Legal Requirements:</strong> When required by law, subpoena, or government request</li>
-              <li><strong>Business Transfers:</strong> In connection with a merger, acquisition, or sale of assets</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">5. Your Rights</h2>
-            <p className="mb-3">Depending on your jurisdiction, you may have the right to:</p>
-            <ul className="list-disc pl-6 space-y-1">
-              <li><strong>Access:</strong> Request a copy of the personal data we hold about you</li>
-              <li><strong>Rectification:</strong> Update or correct inaccurate personal data via Settings</li>
-              <li><strong>Deletion:</strong> Request deletion of your account and associated data</li>
-              <li><strong>Portability:</strong> Receive your data in a structured, machine-readable format</li>
-              <li><strong>Withdraw Consent:</strong> Opt out of non-essential cookies at any time via the Cookie Settings</li>
-            </ul>
-            <p className="mt-3">To exercise these rights, contact us at privacy@sportsync.app.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">6. Data Retention</h2>
-            <p>We retain your account data for as long as your account is active. Login sessions expire after 7 days (or 30 days with Remember Me). Upon account deletion, we remove your personal data within 30 days, except where retention is required by law. Anonymized analytics data may be retained indefinitely.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">7. Children's Privacy</h2>
-            <p>SportSync is not intended for users under 18 years of age. We do not knowingly collect personal information from anyone under 18. If we become aware that a user is under 18, we will promptly terminate the account and delete any associated data.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">8. Changes to This Policy</h2>
-            <p>We may update this Privacy Policy from time to time. We will notify you of significant changes by posting a prominent notice on the Service. Your continued use of the Service after changes constitutes acceptance of the updated policy.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">9. Contact</h2>
-            <p>For privacy-related questions or to exercise your data rights, contact us at privacy@sportsync.app.</p>
-          </section>
+      <StaticPageSection
+        id="use"
+        title="How we use information"
+        summary="We use information to operate the product, personalize it, and protect it."
+      >
+        <div className="rounded-2xl border border-muted/15 bg-background/35 p-5">
+          <ul className="space-y-3 text-sm leading-7 text-muted">
+            {useCases.map((item) => (
+              <li key={item} className="flex gap-3">
+                <span className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      </main>
+      </StaticPageSection>
 
-      <Footer />
-    </div>
+      <StaticPageSection
+        id="cookies"
+        title="Cookies and preference management"
+        summary="Cookie practices are addressed in their own policy, but the privacy policy should still explain the role they play."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            SportSync uses cookies and similar browser storage mechanisms to support login state, privacy preferences, and selected product settings. Some of these technologies are essential to make authenticated experiences work correctly.
+          </p>
+          <p>
+            You can review more detail in our{" "}
+            <Link to={ROUTES.COOKIES} className="text-accent transition-colors hover:text-accent-hover">
+              Cookie Policy
+            </Link>
+            , and you can manage non-essential categories through the product's consent controls when available.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="sharing"
+        title="Sharing and disclosures"
+        summary="The goal here is clarity: when we share data, it should be understandable why."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            We do not sell personal information. We may share information with service providers and vendors that help us host, secure, authenticate, or operate the service.
+          </p>
+          <p>
+            If you choose to sign in with Google, Google processes the authentication flow under its own terms and privacy practices. If you access third-party links or provider-hosted assets, those services may also receive technical request information consistent with normal web operation.
+          </p>
+          <p>
+            We may also disclose information when required by law, to protect rights and safety, or in connection with a corporate transaction such as a merger, financing, acquisition, or asset sale.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="security-retention"
+        title="Security and retention"
+        summary="This section should be specific enough to build trust without making promises the product cannot support."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            SportSync uses reasonable administrative, technical, and organizational safeguards intended to protect personal information. These safeguards include account security controls, hashed passwords, session protections, and abuse-mitigation measures such as rate limiting and login protection workflows.
+          </p>
+          <p>
+            We retain information for as long as needed to operate the service, comply with legal obligations, resolve disputes, enforce agreements, and maintain legitimate business records. Retention periods may vary depending on the type of data and the purpose for which it was collected.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="rights"
+        title="Rights and choices"
+        summary="Privacy rights depend on applicable law, but users should still be told what kinds of requests are generally supported."
+      >
+        <div className="rounded-2xl border border-muted/15 bg-background/35 p-5">
+          <ul className="space-y-3 text-sm leading-7 text-muted">
+            {rightsItems.map((item) => (
+              <li key={item} className="flex gap-3">
+                <span className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-4 text-sm leading-7 text-muted">
+            To make a privacy request or ask a question about your information, contact{" "}
+            <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
+              privacy@sportsync.app
+            </a>
+            .
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="children"
+        title="Children's privacy"
+        summary="The product is not designed for minors."
+      >
+        <p className="text-sm leading-7 text-muted">
+          SportSync is intended for users who are at least 18 years old. We do not knowingly provide the service to children or intentionally collect personal information from users under that age threshold.
+        </p>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="changes-contact"
+        title="Changes and contact"
+        summary="Good policy pages close with a simple explanation of updates and a direct contact path."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            We may update this policy as the product, legal requirements, or data practices evolve. When that happens, we will revise the date at the top of this page and, where appropriate, provide additional notice inside the product.
+          </p>
+          <p>
+            For privacy-related questions, contact{" "}
+            <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
+              privacy@sportsync.app
+            </a>
+            .
+          </p>
+        </div>
+      </StaticPageSection>
+    </StaticPageShell>
   );
 }

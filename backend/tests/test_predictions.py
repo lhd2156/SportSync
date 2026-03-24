@@ -136,7 +136,7 @@ def test_expanded_feature_count():
     """Verify we have ~50 features."""
     from ml.pipeline import FEATURE_COLUMNS
 
-    assert len(FEATURE_COLUMNS) >= 45, f"Expected ~50 features, got {len(FEATURE_COLUMNS)}"
+    assert len(FEATURE_COLUMNS) >= 55, f"Expected expanded feature set, got {len(FEATURE_COLUMNS)}"
 
 
 def test_probabilities_valid_range():
@@ -255,6 +255,227 @@ def test_odds_to_probability():
     assert abs(prob + prob_under - 1.0) < 0.001
 
 
+def test_american_odds_to_probability():
+    from ml.predict import _american_odds_to_probability
+
+    assert _american_odds_to_probability(-150) == 0.6
+    assert round(_american_odds_to_probability(+130), 4) == 0.4348
+    assert _american_odds_to_probability("EVEN") == 0.5
+
+
+def test_extract_market_odds_signal_prefers_pickcenter_moneyline():
+    from ml.predict import _extract_market_odds_signal
+
+    summary = {
+        "pickcenter": [
+            {
+                "moneyline": {
+                    "home": {
+                        "close": {"odds": "+130"},
+                        "live": {"odds": "+125"},
+                    },
+                    "away": {
+                        "close": {"odds": "-150"},
+                        "live": {"odds": "-145"},
+                    },
+                }
+            }
+        ]
+    }
+
+    home_prob, draw_prob, factors = _extract_market_odds_signal(summary, game_status="upcoming")
+    assert draw_prob is None
+    assert 0.40 < home_prob < 0.45
+    assert any("Moneyline" in factor for factor in factors)
+
+
+def test_extract_market_odds_signal_handles_draw_market():
+    from ml.predict import _extract_market_odds_signal
+
+    summary = {
+        "header": {
+            "competitions": [
+                {
+                    "odds": [
+                        {
+                            "homeTeamOdds": {"moneyLine": 210},
+                            "awayTeamOdds": {"moneyLine": 120},
+                            "drawOdds": {"moneyLine": 230},
+                            "details": "AWY -0.5",
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+    home_prob, draw_prob, factors = _extract_market_odds_signal(summary, game_status="upcoming")
+    assert home_prob is not None
+    assert draw_prob is not None
+    assert 0.20 < draw_prob < 0.35
+    assert any("draw" in factor.lower() for factor in factors)
+
+
+def test_market_movement_signal_detects_home_steam():
+    from ml.predict import _market_movement_signal
+
+    summary = {
+        "pickcenter": [
+            {
+                "moneyline": {
+                    "home": {
+                        "open": {"odds": "+125"},
+                        "close": {"odds": "+105"},
+                    },
+                    "away": {
+                        "open": {"odds": "-145"},
+                        "close": {"odds": "-125"},
+                    },
+                }
+            }
+        ]
+    }
+
+    shift, confidence_delta, factors = _market_movement_signal(summary, game_status="upcoming")
+    assert shift > 0
+    assert confidence_delta > 0
+    assert any("Market movement" in factor for factor in factors)
+
+
+def test_extract_live_winprobability_signal_handles_draw():
+    from ml.predict import _extract_live_winprobability_signal
+
+    summary = {
+        "winprobability": [
+            {"homeWinPercentage": 0.46, "tiePercentage": 0.18},
+        ]
+    }
+
+    home_prob, draw_prob, factors = _extract_live_winprobability_signal(summary)
+    assert home_prob is not None
+    assert draw_prob == 0.18
+    assert 0.55 < home_prob < 0.57
+    assert factors
+
+
+def test_weather_signal_reduces_confidence_in_bad_conditions():
+    from ml.predict import _weather_signal
+
+    summary = {
+        "gameInfo": {
+            "weather": {
+                "temperature": 29,
+                "gust": 28,
+                "precipitation": 55,
+            }
+        }
+    }
+
+    shift, reversion, confidence_delta, factors = _weather_signal(summary)
+    assert shift > 0
+    assert reversion > 0
+    assert confidence_delta < 0
+    assert factors
+
+
+def test_depth_chart_impact_penalizes_thin_rotation():
+    from ml.predict import _depth_chart_impact_score
+
+    injuries = [
+        {"name": "Lead Guard", "position": "PG", "status": "out", "is_starter": True},
+        {"name": "Backup Guard", "position": "PG", "status": "questionable", "is_starter": False},
+    ]
+    roster = [
+        {"name": "Lead Guard", "position": "PG", "experience_years": 6},
+        {"name": "Backup Guard", "position": "PG", "experience_years": 1},
+        {"name": "Emergency Wing", "position": "SF", "experience_years": 0},
+    ]
+
+    impact, factors = _depth_chart_impact_score(injuries, roster, "NBA")
+    assert impact > 0.2
+    assert factors
+
+
+def test_live_boxscore_signal_uses_team_stats():
+    from ml.predict import _live_boxscore_signal
+
+    summary = {
+        "header": {
+            "competitions": [
+                {
+                    "competitors": [
+                        {"homeAway": "home", "team": {"id": "h"}},
+                        {"homeAway": "away", "team": {"id": "a"}},
+                    ]
+                }
+            ]
+        },
+        "boxscore": {
+            "teams": [
+                {
+                    "team": {"id": "h"},
+                    "statistics": [
+                        {"name": "fieldGoalPct", "displayValue": "49"},
+                        {"name": "threePointFieldGoalPct", "displayValue": "41"},
+                        {"name": "freeThrowPct", "displayValue": "84"},
+                        {"name": "totalRebounds", "displayValue": "48"},
+                        {"name": "offensiveRebounds", "displayValue": "11"},
+                        {"name": "totalTurnovers", "displayValue": "9"},
+                        {"name": "fastBreakPoints", "displayValue": "18"},
+                    ],
+                },
+                {
+                    "team": {"id": "a"},
+                    "statistics": [
+                        {"name": "fieldGoalPct", "displayValue": "42"},
+                        {"name": "threePointFieldGoalPct", "displayValue": "31"},
+                        {"name": "freeThrowPct", "displayValue": "76"},
+                        {"name": "totalRebounds", "displayValue": "41"},
+                        {"name": "offensiveRebounds", "displayValue": "7"},
+                        {"name": "totalTurnovers", "displayValue": "15"},
+                        {"name": "fastBreakPoints", "displayValue": "10"},
+                    ],
+                },
+            ]
+        },
+    }
+
+    home_prob, factors = _live_boxscore_signal(summary, "NBA")
+    assert home_prob is not None
+    assert home_prob > 0.6
+    assert factors
+
+
+def test_live_game_state_values_late_low_scoring_lead():
+    from datetime import datetime
+
+    from ml.predict import _apply_live_game_state
+    from models.game import Game
+
+    game = Game(
+        id="live-nhl",
+        home_team_id="home",
+        away_team_id="away",
+        sport="hockey",
+        league="NHL",
+        scheduled_at=datetime.utcnow(),
+        status="live",
+        home_score=2,
+        away_score=1,
+    )
+    setattr(game, "_prediction_status_detail", "2:00 - 3rd")
+
+    home_prob, away_prob = _apply_live_game_state(
+        league_key="NHL",
+        game=game,
+        base_home_win_prob=0.55,
+        base_away_win_prob=0.45,
+    )
+
+    assert 0.7 < home_prob < 0.99
+    assert round(home_prob + away_prob, 6) == 1.0
+
+
 # ── Injury impact ──
 
 def test_injury_impact_score():
@@ -297,6 +518,25 @@ def test_win_pct_gap():
     )
     # win_pct_gap = home_season_win_pct - away_season_win_pct
     assert features["win_pct_gap"] == features["home_season_win_pct"] - features["away_season_win_pct"]
+
+
+def test_new_gap_features():
+    from ml.pipeline import build_matchup_features
+
+    features = build_matchup_features(
+        _sample_games(),
+        home_team_id="t1",
+        away_team_id="t2",
+        league="NBA",
+        scheduled_at="2026-01-10T00:00:00Z",
+    )
+
+    assert features["games_played_gap"] == features["home_games_played"] - features["away_games_played"]
+    assert features["rest_advantage"] == features["home_rest_days"] - features["away_rest_days"]
+    assert features["last3_margin_gap"] == features["home_last3_avg_margin"] - features["away_last3_avg_margin"]
+    assert features["recent_vs_season_gap"] == (
+        features["home_recent_vs_season_delta"] - features["away_recent_vs_season_delta"]
+    )
 
 
 # ── Scoring volatility ──

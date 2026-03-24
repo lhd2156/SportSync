@@ -6,7 +6,9 @@ Pydantic models for user profile and feed responses.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from services.profile_validation import validate_display_handle, validate_person_name
 
 
 class UserProfileResponse(BaseModel):
@@ -36,7 +38,33 @@ class UserProfileUpdateRequest(BaseModel):
     profile_picture_url: Optional[str] = None
     sports: Optional[list[str]] = None
 
+    @field_validator("first_name")
+    @classmethod
+    def validate_first_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return validate_person_name(v, "First name")
+
+    @field_validator("last_name")
+    @classmethod
+    def validate_last_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return validate_person_name(v, "Last name")
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name_field(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return validate_display_handle(v)
+
 
 class DeleteAccountRequest(BaseModel):
     confirm_text: str = Field(min_length=1, max_length=20)
     current_password: Optional[str] = Field(default=None, min_length=1, max_length=128)
+
+
+class AvatarUploadResponse(BaseModel):
+    detail: str
+    profile_picture_url: str

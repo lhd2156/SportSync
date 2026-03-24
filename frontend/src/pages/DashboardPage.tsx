@@ -8,9 +8,10 @@
  * 4. Real ESPN news headlines
  * 5. Live activity feed with play-by-play
  *
- * Scores refresh every 15s for live data.
+ * Scores refresh every 12s for live data.
  */
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Navbar from "../components/Navbar";
 import FeaturedCarousel from "../components/FeaturedCarousel";
 import SportTabBar from "../components/SportTabBar";
@@ -22,6 +23,21 @@ import LiveActivityFeed from "../components/LiveActivityFeed";
 import Footer from "../components/Footer";
 import apiClient from "../api/client";
 import { API } from "../constants";
+import type {
+  ActivityCacheEntry,
+  ActivityDisplayOrder,
+  ActivityItem,
+  CachedFeaturedEntry,
+  CachedNewsEntry,
+  ESPNGame,
+  FeaturedItem,
+  GameItem,
+  GameSlateCacheEntry,
+  NewsItem,
+  PredictionCacheEntry,
+  PredictionResult,
+  SavedTeamSummary,
+} from "../types/dashboard";
 
 /* ── SVG Icons (no emojis) ── */
 const IconUpcoming = () => (
@@ -41,124 +57,95 @@ const LEAGUE_PRIORITY: Record<string, number> = {
   NFL: 0, NBA: 1, MLB: 2, NHL: 3, EPL: 4,
 };
 const ACTIVITY_PAGE_SIZE = 40;
-const ACTIVITY_DISPLAY_CACHE_VERSION = "v13";
+const ACTIVITY_DISPLAY_CACHE_VERSION = "v19";
+const ACTIVITY_CACHE_STORAGE_KEY = `sportsync_activity_cache_${ACTIVITY_DISPLAY_CACHE_VERSION}`;
+const PREDICTION_CACHE_STORAGE_KEY = "sportsync_prediction_cache_v2";
+const GAME_SLATE_CACHE_STORAGE_KEY = "sportsync_game_slate_cache_v3";
+const DASHBOARD_NEWS_CACHE_STORAGE_KEY = "sportsync_dashboard_news_cache_v1";
+const DASHBOARD_FEATURED_CACHE_STORAGE_KEY = "sportsync_dashboard_featured_cache_v1";
+const LIVE_DASHBOARD_REFRESH_MS = 12_000;
+const LIVE_PREDICTION_CACHE_TTL_MS = 12_000;
+const DASHBOARD_NEWS_CACHE_TTL_MS = 10 * 60_000;
+const DASHBOARD_FEATURED_CACHE_TTL_MS = 60_000;
+
+const warmedDashboardImageUrls = new Set<string>();
 
 function isDashboardLeague(league: string): boolean {
   return DASHBOARD_LEAGUE_SET.has(league);
 }
 
-/* ESPN game shape from our backend proxy */
-interface ESPNGame {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeAbbr: string;
-  awayAbbr: string;
-  homeScore: number;
-  awayScore: number;
-  homeBadge: string;
-  awayBadge: string;
-  homeColor?: string;
-  awayColor?: string;
-  status: string;
-  statusDetail: string;
-  league: string;
-  dateEvent: string;
-  strTime: string;
-  strEvent: string;
-  strVenue: string;
-  headline: string;
+function readSessionJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
-interface GameItem {
-  id: string;
-  homeTeam: { name: string; shortName?: string; logoUrl?: string | null; color?: string | null };
-  awayTeam: { name: string; shortName?: string; logoUrl?: string | null; color?: string | null };
-  homeScore: number;
-  awayScore: number;
-  status: string;
-  statusDetail: string;
-  league: string;
-  leagueKey: string;
-  scheduledAt: string;
+function writeSessionJson<T>(key: string, value: T): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota / private mode failures and keep the app interactive.
+  }
 }
 
-interface PredictionResult {
-  gameId: string;
-  homeWinProb: number;
-  awayWinProb: number;
-  modelVersion: string;
+function isFreshCache(cachedAt: number, ttlMs: number): boolean {
+  return Number.isFinite(cachedAt) && Date.now() - cachedAt < ttlMs;
 }
 
-interface PredictionCacheEntry {
-  fetchedAt: number;
-  fingerprint: string;
-  data: PredictionResult | null;
+function readDashboardNewsCache({ freshOnly }: { freshOnly: boolean }): Record<string, NewsItem[]> {
+  const cached = readSessionJson<Record<string, CachedNewsEntry>>(DASHBOARD_NEWS_CACHE_STORAGE_KEY, {});
+  return Object.entries(cached).reduce<Record<string, NewsItem[]>>((next, [leagueKey, entry]) => {
+    if (!entry?.items?.length) {
+      return next;
+    }
+    if (!freshOnly || isFreshCache(entry.cachedAt, DASHBOARD_NEWS_CACHE_TTL_MS)) {
+      next[leagueKey] = entry.items;
+    }
+    return next;
+  }, {});
 }
 
-interface NewsItem {
-  id: string;
-  headline: string;
-  source: string;
-  imageUrl: string | null;
-  publishedAt: string;
-  url: string | null;
-  league: string;
-  description?: string;
+function writeDashboardNewsCacheEntry(leagueKey: string, items: NewsItem[]): void {
+  const cached = readSessionJson<Record<string, CachedNewsEntry>>(DASHBOARD_NEWS_CACHE_STORAGE_KEY, {});
+  cached[leagueKey] = {
+    cachedAt: Date.now(),
+    items,
+  };
+  writeSessionJson(DASHBOARD_NEWS_CACHE_STORAGE_KEY, cached);
 }
 
-interface FeaturedItem {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeScore: number;
-  awayScore: number;
-  status: string;
-  statusDetail: string;
-  league: string;
-  homeBadge: string | null;
-  awayBadge: string | null;
-  thumb: string | null;
-  dateEvent: string;
-  strTime: string;
-  strEvent: string;
-  strVenue: string;
+function readFreshDashboardFeaturedCache(): FeaturedItem[] {
+  const cached = readSessionJson<CachedFeaturedEntry | null>(DASHBOARD_FEATURED_CACHE_STORAGE_KEY, null);
+  if (!cached || !cached.items || !isFreshCache(cached.cachedAt, DASHBOARD_FEATURED_CACHE_TTL_MS)) {
+    return [];
+  }
+  return cached.items;
 }
 
-/* Activity item shape matching new LiveActivityFeed */
-interface ActivityItem {
-  id: string;
-  gameId: string;
-  text: string;
-  playType: string;
-  athleteName: string;
-  athleteHeadshot: string;
-  athleteStats: string;
-  athlete2Name: string;
-  athlete2Headshot: string;
-  playTeamName: string;
-  playTeamAbbr: string;
-  playTeamLogo: string;
-  league: string;
-  statusDetail: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeAbbr: string;
-  awayAbbr: string;
-  homeScore: number;
-  awayScore: number;
-  homeBadge: string;
-  awayBadge: string;
-  status: string;
-  sortWallclock?: string;
-  isSavedTeam?: boolean;
+function writeDashboardFeaturedCache(items: FeaturedItem[]): void {
+  writeSessionJson(DASHBOARD_FEATURED_CACHE_STORAGE_KEY, {
+    cachedAt: Date.now(),
+    items,
+  } satisfies CachedFeaturedEntry);
 }
 
-interface ActivityCacheEntry {
-  items: ActivityItem[];
-  total: number;
-  hasMore: boolean;
-  allItems?: ActivityItem[];
+function warmDashboardImages(urls: Array<string | null | undefined>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  urls.forEach((url) => {
+    if (!url || warmedDashboardImageUrls.has(url)) {
+      return;
+    }
+    warmedDashboardImageUrls.add(url);
+    const image = new Image();
+    image.decoding = "async";
+    image.src = url;
+  });
 }
 
 function mapESPNGame(g: ESPNGame): GameItem {
@@ -182,7 +169,7 @@ function mapESPNGame(g: ESPNGame): GameItem {
     statusDetail: g.statusDetail || "",
     league: g.league,
     leagueKey: g.league,
-    scheduledAt: g.dateEvent || "",
+    scheduledAt: g.scheduledAt || g.dateEvent || "",
   };
 }
 
@@ -190,8 +177,166 @@ function formatCompactDate(date: Date): string {
   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function normalizeTeamMatchValue(value: string): string {
+  return (value || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeSavedTeamLeague(value: string | undefined): string {
+  const normalized = (value || "").trim().toUpperCase();
+  if (normalized === "ENGLISH PREMIER LEAGUE") return "EPL";
+  return normalized;
+}
+
+function matchesSavedTeamSide(
+  gameTeam: { name: string; shortName?: string },
+  gameLeague: string,
+  savedTeam: SavedTeamSummary,
+): boolean {
+  const savedLeague = normalizeSavedTeamLeague(savedTeam.league || savedTeam.sport);
+  const normalizedGameLeague = normalizeSavedTeamLeague(gameLeague);
+  if (savedLeague && normalizedGameLeague && savedLeague !== normalizedGameLeague) {
+    return false;
+  }
+
+  const gameFull = normalizeTeamMatchValue(gameTeam.name);
+  const gameShort = normalizeTeamMatchValue(gameTeam.shortName || "");
+  const savedFull = normalizeTeamMatchValue(savedTeam.name);
+  const savedShort = normalizeTeamMatchValue(savedTeam.shortName || "");
+
+  if (!savedFull && !savedShort) {
+    return false;
+  }
+
+  return (
+    (!!savedFull && (gameFull === savedFull || gameShort === savedFull || gameFull.endsWith(savedFull))) ||
+    (!!savedShort && (gameFull === savedShort || gameShort === savedShort || gameFull.endsWith(savedShort) || gameShort.endsWith(savedShort)))
+  );
+}
+
+function buildLocalSavedTeamFallback(): SavedTeamSummary[] {
+  try {
+    const stored = localStorage.getItem("sportsync_saved_teams");
+    const parsed = stored ? JSON.parse(stored) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    if (parsed.every((value) => value && typeof value === "object")) {
+      return parsed
+        .map((team): SavedTeamSummary | null => {
+          const record = team as Record<string, unknown>;
+          const name = String(record.name || "");
+          const shortName = String(record.short_name || record.shortName || "").trim();
+          const league = typeof record.league === "string" ? record.league : "";
+          const sport = typeof record.sport === "string" ? record.sport : "";
+          const id = String(record.external_id || record.id || `local:${normalizeTeamMatchValue(name)}`);
+          if (!name.trim()) {
+            return null;
+          }
+          return {
+            id,
+            name,
+            shortName: shortName || name.trim().split(/\s+/).pop() || name,
+            league,
+            sport,
+          };
+        })
+        .filter((team): team is SavedTeamSummary => team !== null);
+    }
+    return parsed
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .map((name) => ({
+        id: `local:${normalizeTeamMatchValue(name)}`,
+        name,
+        shortName: name.trim().split(/\s+/).pop() || name,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function serializeSavedTeamSummary(team: SavedTeamSummary): Record<string, unknown> {
+  return {
+    id: team.id,
+    name: team.name,
+    short_name: team.shortName || "",
+    league: team.league || "",
+    sport: team.sport || "",
+  };
+}
+
+function mapSavedTeamRecords(rawTeams: Record<string, unknown>[]): SavedTeamSummary[] {
+  return rawTeams
+    .map((team): SavedTeamSummary | null => {
+      const id = String(team.id || team.external_id || "");
+      const name = String(team.name || "");
+      if (!id || !name) {
+        return null;
+      }
+      return {
+        id,
+        name,
+        shortName: typeof team.short_name === "string" ? team.short_name : undefined,
+        league: typeof team.league === "string" ? team.league : "",
+        sport: typeof team.sport === "string" ? team.sport : "",
+      };
+    })
+    .filter((team): team is SavedTeamSummary => team !== null);
+}
+
+function isFutureCompactDate(dateStr?: string): boolean {
+  return Boolean(dateStr && dateStr > formatCompactDate(new Date()));
+}
+
 function buildActivityCacheKey(dateStr?: string, leagueStr?: string): string {
   return `${ACTIVITY_DISPLAY_CACHE_VERSION}::${(leagueStr || "ALL").toUpperCase()}::${dateStr || "LIVE"}`;
+}
+
+function parseCompactDate(dateStr?: string): Date | null {
+  if (!dateStr || !/^\d{8}$/.test(dateStr)) {
+    return null;
+  }
+
+  const year = Number(dateStr.slice(0, 4));
+  const month = Number(dateStr.slice(4, 6));
+  const day = Number(dateStr.slice(6, 8));
+  const candidate = new Date(year, month - 1, day);
+
+  if (
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() !== month - 1 ||
+    candidate.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function getCurrentActivityDay(): string {
+  return formatCompactDate(new Date());
+}
+
+function isLiveActivityCacheKey(cacheKey: string): boolean {
+  return cacheKey.endsWith("::LIVE");
+}
+
+function isFreshLiveActivityEntry(cacheKey: string, entry?: ActivityCacheEntry | null): entry is ActivityCacheEntry {
+  if (!entry) {
+    return false;
+  }
+
+  if (!isLiveActivityCacheKey(cacheKey)) {
+    const explicitDate = cacheKey.split("::").pop() || "";
+    if (isFutureCompactDate(explicitDate)) {
+      const cachedToday = entry.cachedForDay === getCurrentActivityDay();
+      const scheduleOnly = entry.items.every((item) => item.playType === "Scheduled Game");
+      const freshEnough = typeof entry.cachedAt === "number" && Date.now() - entry.cachedAt < 5 * 60 * 1000;
+      return cachedToday && scheduleOnly && freshEnough;
+    }
+    return true;
+  }
+
+  return entry.cachedForDay === getCurrentActivityDay();
 }
 
 function getActivityBoundaryRank(item: ActivityItem): number {
@@ -314,23 +459,42 @@ function getActivityRecency(item: ActivityItem): { period: number; progress: num
   return { period: 0, progress: 0 };
 }
 
-function compareActivitiesWithinGame(a: ActivityItem, b: ActivityItem): number {
+function compareActivitiesWithinGame(
+  a: ActivityItem,
+  b: ActivityItem,
+  order: ActivityDisplayOrder = "recentFirst",
+): number {
   const aRecency = getActivityRecency(a);
   const bRecency = getActivityRecency(b);
-  if (aRecency.period !== bRecency.period) return bRecency.period - aRecency.period;
+  if (aRecency.period !== bRecency.period) {
+    return order === "chronological"
+      ? aRecency.period - bRecency.period
+      : bRecency.period - aRecency.period;
+  }
 
   const aBoundary = getActivityBoundaryRank(a);
   const bBoundary = getActivityBoundaryRank(b);
-  if (aBoundary !== bBoundary) return bBoundary - aBoundary;
-
-  if (aRecency.progress !== bRecency.progress) {
-    return bRecency.progress - aRecency.progress;
+  if (aBoundary !== bBoundary) {
+    return order === "chronological"
+      ? aBoundary - bBoundary
+      : bBoundary - aBoundary;
   }
 
-  return getActivitySequence(b) - getActivitySequence(a);
+  if (aRecency.progress !== bRecency.progress) {
+    return order === "chronological"
+      ? aRecency.progress - bRecency.progress
+      : bRecency.progress - aRecency.progress;
+  }
+
+  return order === "chronological"
+    ? getActivitySequence(a) - getActivitySequence(b)
+    : getActivitySequence(b) - getActivitySequence(a);
 }
 
-function sortActivitiesForDisplay(items: ActivityItem[]): ActivityItem[] {
+function sortActivitiesForDisplay(
+  items: ActivityItem[],
+  order: ActivityDisplayOrder = "recentFirst",
+): ActivityItem[] {
   return items
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
@@ -339,17 +503,43 @@ function sortActivitiesForDisplay(items: ActivityItem[]): ActivityItem[] {
       const aWallclock = a.sortWallclock || "";
       const bWallclock = b.sortWallclock || "";
       if (aWallclock && bWallclock && aWallclock !== bWallclock) {
-        return bWallclock.localeCompare(aWallclock);
+        return order === "chronological"
+          ? aWallclock.localeCompare(bWallclock)
+          : bWallclock.localeCompare(aWallclock);
       }
 
       const sameGame = (a.gameId || a.id) === (b.gameId || b.id);
       if (sameGame) {
-        return compareActivitiesWithinGame(a, b);
+        return compareActivitiesWithinGame(a, b, order);
       }
 
       return left.index - right.index;
     })
     .map(({ item }) => item);
+}
+
+function sortSummaryActivitiesChronologically(items: ActivityItem[]): ActivityItem[] {
+  return [...items].sort((a, b) => {
+    const aWallclock = a.sortWallclock || "";
+    const bWallclock = b.sortWallclock || "";
+
+    if (aWallclock && bWallclock && aWallclock !== bWallclock) {
+      return aWallclock.localeCompare(bWallclock);
+    }
+    if (aWallclock !== bWallclock) {
+      return aWallclock ? -1 : 1;
+    }
+
+    const aLeagueRank = LEAGUE_PRIORITY[a.league] ?? 99;
+    const bLeagueRank = LEAGUE_PRIORITY[b.league] ?? 99;
+    if (aLeagueRank !== bLeagueRank) {
+      return aLeagueRank - bLeagueRank;
+    }
+
+    const aMatchup = a.gameMatchup || `${a.awayAbbr || a.awayTeam} vs ${a.homeAbbr || a.homeTeam}`;
+    const bMatchup = b.gameMatchup || `${b.awayAbbr || b.awayTeam} vs ${b.homeAbbr || b.homeTeam}`;
+    return aMatchup.localeCompare(bMatchup);
+  });
 }
 
 function filterGamesForLeague(games: ESPNGame[], league?: string): ESPNGame[] {
@@ -361,69 +551,51 @@ function filterGamesForLeague(games: ESPNGame[], league?: string): ESPNGame[] {
 
 function getPredictionCacheFingerprint(game: GameItem): string {
   return [
+    game.leagueKey,
     game.status,
     game.statusDetail || "",
+    game.scheduledAt || "",
     String(game.awayScore),
     String(game.homeScore),
   ].join("|");
 }
 
 function getPredictionCacheTtlMs(game: GameItem): number {
-  if (game.status === "live") return 12_000;
+  if (game.status === "live") return LIVE_PREDICTION_CACHE_TTL_MS;
   if (game.status === "upcoming") return 3 * 60_000;
   if (game.status === "final") return 60 * 60_000;
   return 60_000;
 }
 
+function supportsPredictions(game: GameItem): boolean {
+  return game.status === "live" || game.status === "upcoming" || game.status === "final";
+}
+
 export default function DashboardPage() {
+  const cachedNewsByLeague = useMemo(() => readDashboardNewsCache({ freshOnly: true }), []);
+  const staleNewsByLeague = useMemo(() => readDashboardNewsCache({ freshOnly: false }), []);
+  const cachedFeaturedItems = useMemo(() => readFreshDashboardFeaturedCache(), []);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [activeSport, setActiveSport] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState<"all" | "live" | "upcoming" | "final">("all");
-  const [games, setGames] = useState<GameItem[]>([]);
   const [predictionsByGame, setPredictionsByGame] = useState<Record<string, PredictionResult | null>>({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [gamesError, setGamesError] = useState("");
-  const [newsByLeague, setNewsByLeague] = useState<Record<string, NewsItem[]>>({ ALL: [] });
-  const [featuredItems, setFeaturedItems] = useState<FeaturedItem[]>([]);
-  const [featuredLoading, setFeaturedLoading] = useState(true);
-  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
+  const [isDateSwitching, setIsDateSwitching] = useState(false);
+  const [hasResolvedGamesOnce, setHasResolvedGamesOnce] = useState(false);
   const [activityDate, setActivityDate] = useState<string>("");  // "" = today
-  const [activityTotal, setActivityTotal] = useState(0);
-  const [activityHasMore, setActivityHasMore] = useState(false);
-  const [activityLoading, setActivityLoading] = useState(false);
   const [activityLeague, setActivityLeague] = useState<string>("ALL");
-  const [activityError, setActivityError] = useState("");
-  const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const predictionCacheRef = useRef<Record<string, PredictionCacheEntry>>({});
+  const [activityVisibleCount, setActivityVisibleCount] = useState(ACTIVITY_PAGE_SIZE);
+  const predictionCacheRef = useRef<Record<string, PredictionCacheEntry>>(
+    readSessionJson<Record<string, PredictionCacheEntry>>(PREDICTION_CACHE_STORAGE_KEY, {}),
+  );
+  const predictionRequestInFlightRef = useRef<Set<string>>(new Set());
+  const gameSlateCacheRef = useRef<Record<string, GameSlateCacheEntry>>(
+    readSessionJson<Record<string, GameSlateCacheEntry>>(GAME_SLATE_CACHE_STORAGE_KEY, {}),
+  );
+  const eventsRequestPromiseRef = useRef<Record<string, Promise<GameItem[]>>>({});
+  const liveActivityRequestPromiseRef = useRef<Record<string, Promise<ActivityCacheEntry | null>>>({});
   const [predictionRefreshTick, setPredictionRefreshTick] = useState(0);
   const [predictionsLoadingIds, setPredictionsLoadingIds] = useState<Set<string>>(new Set());
-
-  const [savedTeamNames] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem("sportsync_saved_teams");
-      return stored ? JSON.parse(stored) : [];
-    } catch { return []; }
-  });
-
-  const hasSavedTeams = savedTeamNames.length > 0;
-
-  /* Fetch featured carousel data */
-  useEffect(() => {
-    setFeaturedLoading(true);
-    apiClient.get(API.ESPN_FEATURED)
-      .then((resp) => {
-        const items = (resp.data.featured || [])
-          .map((f: ESPNGame) => ({
-            ...f,
-            thumb: null,
-            strTime: f.statusDetail,
-          }))
-          .filter((item: FeaturedItem) => isDashboardLeague(item.league));
-        setFeaturedItems(items);
-      })
-      .catch(() => setFeaturedItems([]))
-      .finally(() => setFeaturedLoading(false));
-  }, []);
+  const predictionsByGameRef = useRef<Record<string, PredictionResult | null>>({});
 
   const mapNewsItems = useCallback((rawItems: NewsItem[]) => {
     return (rawItems || [])
@@ -434,44 +606,183 @@ export default function DashboardPage() {
       }));
   }, []);
 
-  /* Fetch dashboard-wide headlines */
-  useEffect(() => {
-    apiClient.get(API.ESPN_NEWS)
-      .then((resp) => {
-        const items = mapNewsItems(resp.data.news || []);
-        setNewsByLeague((prev) => ({ ...prev, ALL: items }));
-      })
-      .catch(() => setNewsByLeague((prev) => ({ ...prev, ALL: [] })));
-  }, [mapNewsItems]);
+  const initialSavedTeamRecords = useMemo<Record<string, unknown>[]>(
+    () => buildLocalSavedTeamFallback().map((team) => serializeSavedTeamSummary(team)),
+    [],
+  );
+  const { data: rawSavedTeams = initialSavedTeamRecords } = useQuery<Record<string, unknown>[]>({
+    queryKey: ["savedTeams"],
+    queryFn: async () => {
+      const response = await apiClient.get(API.USER_TEAMS);
+      return Array.isArray(response.data) ? response.data : [];
+    },
+    staleTime: 600_000,
+    initialData: initialSavedTeamRecords.length ? initialSavedTeamRecords : undefined,
+    refetchOnWindowFocus: false,
+  });
+  const savedTeams = useMemo(() => mapSavedTeamRecords(rawSavedTeams), [rawSavedTeams]);
+  const selectedDateKey = useMemo(() => formatCompactDate(selectedDate), [selectedDate]);
+  const isSelectedDateToday = useMemo(
+    () => selectedDateKey === formatCompactDate(new Date()),
+    [selectedDateKey],
+  );
+  const gamesQuery = useQuery<GameItem[]>({
+    queryKey: ["dashboardGames", selectedDateKey],
+    queryFn: async () => loadSlateForDate(selectedDateKey),
+    initialData: (() => {
+      const cachedSlate = gameSlateCacheRef.current[selectedDateKey];
+      const isCurrentDay = selectedDateKey === formatCompactDate(new Date());
+      const ttlMs = isCurrentDay ? 30_000 : 15 * 60_000;
+      if (cachedSlate && Date.now() - cachedSlate.cachedAt < ttlMs) {
+        return cachedSlate.data;
+      }
+      return undefined;
+    })(),
+    placeholderData: (previousData) => previousData,
+    refetchInterval: isSelectedDateToday ? LIVE_DASHBOARD_REFRESH_MS : false,
+    refetchIntervalInBackground: false,
+    staleTime: isSelectedDateToday ? 0 : 15 * 60_000,
+  });
+  const games = useMemo(() => gamesQuery.data ?? [], [gamesQuery.data]);
+  const gamesError = gamesQuery.error instanceof Error
+    ? /network|timeout|fetch/i.test(gamesQuery.error.message)
+      ? "Scores are temporarily unavailable because the API server is not responding."
+      : "Scores are temporarily unavailable right now."
+    : "";
+  const isLoading = !hasResolvedGamesOnce && gamesQuery.isLoading;
+  const featuredQuery = useQuery<FeaturedItem[]>({
+    queryKey: ["dashboardFeatured"],
+    queryFn: async () => {
+      const resp = await apiClient.get(API.ESPN_FEATURED);
+      const items = (resp.data.featured || [])
+        .map((featured: ESPNGame) => ({
+          ...featured,
+          thumb: null,
+          strTime: featured.statusDetail,
+        }))
+        .filter((item: FeaturedItem) => isDashboardLeague(item.league));
+      writeDashboardFeaturedCache(items);
+      return items;
+    },
+    initialData: cachedFeaturedItems.length ? cachedFeaturedItems : undefined,
+    staleTime: DASHBOARD_FEATURED_CACHE_TTL_MS,
+    refetchInterval: DASHBOARD_FEATURED_CACHE_TTL_MS,
+    refetchOnWindowFocus: false,
+  });
+  const featuredItems = featuredQuery.data || [];
+  const featuredLoading = featuredQuery.isLoading && featuredItems.length === 0;
+  const allNewsQuery = useQuery<NewsItem[]>({
+    queryKey: ["dashboardNews", "ALL"],
+    queryFn: async () => {
+      const resp = await apiClient.get(API.ESPN_NEWS);
+      const items = mapNewsItems(resp.data.news || []);
+      writeDashboardNewsCacheEntry("ALL", items);
+      return items;
+    },
+    initialData: cachedNewsByLeague.ALL ?? staleNewsByLeague.ALL,
+    staleTime: DASHBOARD_NEWS_CACHE_TTL_MS,
+    refetchOnWindowFocus: false,
+  });
+  const activeLeagueNewsQuery = useQuery<NewsItem[]>({
+    queryKey: ["dashboardNews", activeSport],
+    enabled: activeSport !== "ALL" && activeSport !== "MY_TEAMS",
+    queryFn: async () => {
+      const resp = await apiClient.get(API.ESPN_NEWS, { params: { league: activeSport } });
+      const items = mapNewsItems(resp.data.news || []);
+      writeDashboardNewsCacheEntry(activeSport, items);
+      return items;
+    },
+    initialData: activeSport !== "ALL" && activeSport !== "MY_TEAMS"
+      ? cachedNewsByLeague[activeSport] ?? staleNewsByLeague[activeSport]
+      : undefined,
+    staleTime: DASHBOARD_NEWS_CACHE_TTL_MS,
+    refetchOnWindowFocus: false,
+  });
 
-  /* Fetch league-specific headlines on demand so NHL/EPL don't get hidden by the combined slice */
-  useEffect(() => {
-    if (activeSport === "ALL" || activeSport === "MY_TEAMS") {
-      return;
-    }
-    if (newsByLeague[activeSport]) {
-      return;
-    }
+  const hasSavedTeams = savedTeams.length > 0;
+  const isSavedMatchup = useCallback(
+    (
+      homeTeam: { name: string; shortName?: string },
+      awayTeam: { name: string; shortName?: string },
+      gameLeague: string,
+    ) => savedTeams.some((team) =>
+      matchesSavedTeamSide(homeTeam, gameLeague, team) || matchesSavedTeamSide(awayTeam, gameLeague, team)
+    ),
+    [savedTeams],
+  );
 
-    let cancelled = false;
-    apiClient.get(API.ESPN_NEWS, { params: { league: activeSport } })
-      .then((resp) => {
-        if (cancelled) return;
-        const items = mapNewsItems(resp.data.news || []);
-        setNewsByLeague((prev) => ({ ...prev, [activeSport]: items }));
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setNewsByLeague((prev) => ({ ...prev, [activeSport]: [] }));
+  useEffect(() => {
+    predictionsByGameRef.current = predictionsByGame;
+  }, [predictionsByGame]);
+
+  useEffect(() => {
+    const activeGameIds = new Set(games.map((game) => game.id));
+    const predictionEligibleIds = new Set(
+      games.filter((game) => supportsPredictions(game)).map((game) => game.id),
+    );
+
+    setPredictionsByGame((prev) => {
+      const prevKeys = Object.keys(prev);
+      if (prevKeys.length === 0) {
+        return prev;
+      }
+
+      const nextEntries = prevKeys
+        .filter((gameId) => activeGameIds.has(gameId))
+        .map((gameId) => [gameId, prev[gameId]] as const);
+
+      if (nextEntries.length === prevKeys.length) {
+        return prev;
+      }
+
+      return Object.fromEntries(nextEntries);
+    });
+
+    setPredictionsLoadingIds((prev) => {
+      if (prev.size === 0) {
+        return prev;
+      }
+
+      let removedAny = false;
+      const next = new Set<string>();
+      prev.forEach((gameId) => {
+        if (predictionEligibleIds.has(gameId)) {
+          next.add(gameId);
+        } else {
+          removedAny = true;
+        }
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSport, mapNewsItems, newsByLeague]);
+      return removedAny ? next : prev;
+    });
+  }, [games]);
+
+  useEffect(() => {
+    if (gamesQuery.data || gamesQuery.error) {
+      setHasResolvedGamesOnce(true);
+    }
+    if (!gamesQuery.isFetching) {
+      setIsDateSwitching(false);
+    }
+  }, [gamesQuery.data, gamesQuery.error, gamesQuery.isFetching]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sportsync_saved_teams", JSON.stringify(rawSavedTeams));
+    } catch {
+      // Ignore local storage sync failures and keep the shared query cache authoritative.
+    }
+  }, [rawSavedTeams]);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, []);
 
   /* Parse activity response into ActivityItem[] */
-  const parseActivities = useCallback((data: Record<string, unknown>[]) => {
+  const parseActivities = useCallback((
+    data: Record<string, unknown>[],
+    order: ActivityDisplayOrder = "recentFirst",
+  ) => {
     const items = data.map((a: Record<string, unknown>) => ({
       id: a.id as string,
       gameId: (a.gameId as string) || (a.id as string),
@@ -498,26 +809,35 @@ export default function DashboardPage() {
       gameMatchup: (a.gameMatchup as string) || "",
       status: a.status as string,
       sortWallclock: (a.sortWallclock as string) || (a._wallclock as string) || "",
-      isSavedTeam: savedTeamNames.some((t) =>
-        String(a.homeTeam).toLowerCase().includes(t.toLowerCase()) ||
-        String(a.awayTeam).toLowerCase().includes(t.toLowerCase())
+      isSavedTeam: isSavedMatchup(
+        { name: String(a.homeTeam || ""), shortName: String(a.homeAbbr || "") },
+        { name: String(a.awayTeam || ""), shortName: String(a.awayAbbr || "") },
+        String(a.league || ""),
       ),
     })) as ActivityItem[];
 
-    return sortActivitiesForDisplay(items);
-  }, [savedTeamNames]);
+    return sortActivitiesForDisplay(items, order);
+  }, [isSavedMatchup]);
 
   const buildGameSummaryActivities = useCallback((games: ESPNGame[]) => {
-    return games.map((game) => {
-      const summaryText = game.headline
-        ? `${game.headline} - ${game.awayTeam} ${game.awayScore}, ${game.homeTeam} ${game.homeScore}`
-        : `${game.awayTeam} ${game.awayScore}, ${game.homeTeam} ${game.homeScore}`;
+    const items = games.map((game) => {
+      const isUpcoming = game.status === "upcoming";
+      const summaryText = isUpcoming
+        ? `${game.awayTeam} at ${game.homeTeam}`
+        : game.headline
+          ? `${game.headline} - ${game.awayTeam} ${game.awayScore}, ${game.homeTeam} ${game.homeScore}`
+          : `${game.awayTeam} ${game.awayScore}, ${game.homeTeam} ${game.homeScore}`;
 
       return {
         id: `summary_${game.league}_${game.id}`,
         gameId: game.id,
         text: summaryText,
-        playType: game.status === "live" ? "Game Update" : "End of Game",
+        playType:
+          game.status === "live"
+            ? "Game Update"
+            : game.status === "upcoming"
+              ? "Scheduled Game"
+              : "End of Game",
         athleteName: "",
         athleteHeadshot: "",
         athleteStats: "",
@@ -538,83 +858,232 @@ export default function DashboardPage() {
         awayBadge: game.awayBadge || "",
         gameMatchup: `${game.awayAbbr || game.awayTeam} vs ${game.homeAbbr || game.homeTeam}`,
         status: game.status,
-        isSavedTeam: savedTeamNames.some((teamName) =>
-          game.homeTeam.toLowerCase().includes(teamName.toLowerCase()) ||
-          game.awayTeam.toLowerCase().includes(teamName.toLowerCase()),
+        sortWallclock: game.scheduledAt || game.dateEvent || "",
+        isSavedTeam: isSavedMatchup(
+          { name: game.homeTeam, shortName: game.homeAbbr || "" },
+          { name: game.awayTeam, shortName: game.awayAbbr || "" },
+          game.league,
         ),
       };
     }) as ActivityItem[];
-  }, [savedTeamNames]);
+
+    return sortSummaryActivitiesChronologically(items);
+  }, [isSavedMatchup]);
+
+  const buildDashboardGameSummaryActivities = useCallback((gameItems: GameItem[]) => {
+    const items = gameItems.map((game) => {
+      const isUpcoming = game.status === "upcoming";
+      const awayLabel = game.awayTeam.shortName || game.awayTeam.name;
+      const homeLabel = game.homeTeam.shortName || game.homeTeam.name;
+      return {
+        id: `dashboard_summary_${game.league}_${game.id}`,
+        gameId: game.id,
+        text: isUpcoming
+          ? `${game.awayTeam.name} at ${game.homeTeam.name}`
+          : `${game.awayTeam.name} ${game.awayScore}, ${game.homeTeam.name} ${game.homeScore}`,
+        playType:
+          game.status === "live"
+            ? "Game Update"
+            : game.status === "upcoming"
+              ? "Scheduled Game"
+              : "End of Game",
+        athleteName: "",
+        athleteHeadshot: "",
+        athleteStats: "",
+        athlete2Name: "",
+        athlete2Headshot: "",
+        playTeamName: "",
+        playTeamAbbr: "",
+        playTeamLogo: "",
+        league: game.league,
+        statusDetail: game.statusDetail || "",
+        homeTeam: game.homeTeam.name,
+        awayTeam: game.awayTeam.name,
+        homeAbbr: game.homeTeam.shortName || "",
+        awayAbbr: game.awayTeam.shortName || "",
+        homeScore: game.homeScore,
+        awayScore: game.awayScore,
+        homeBadge: game.homeTeam.logoUrl || "",
+        awayBadge: game.awayTeam.logoUrl || "",
+        gameMatchup: `${awayLabel} vs ${homeLabel}`,
+        status: game.status,
+        sortWallclock: game.scheduledAt || "",
+        isSavedTeam: isSavedMatchup(
+          { name: game.homeTeam.name, shortName: game.homeTeam.shortName || "" },
+          { name: game.awayTeam.name, shortName: game.awayTeam.shortName || "" },
+          game.leagueKey,
+        ),
+      };
+    }) as ActivityItem[];
+
+    return sortSummaryActivitiesChronologically(items);
+  }, [isSavedMatchup]);
 
   const fetchLiveActivityDirect = useCallback(async (leagueStr?: string) => {
     const todayStr = formatCompactDate(new Date());
-    const scoreboardResp = await apiClient.get(API.ESPN_ALL, {
-      params: { d: todayStr },
-    });
-
-    const liveGames = filterGamesForLeague(scoreboardResp.data.games || [], leagueStr).filter(
-      (game) => game.status === "live",
-    );
-
-    if (!liveGames.length) {
-      return null;
+    const requestKey = `${(leagueStr || "ALL").toUpperCase()}::${todayStr}`;
+    const existingRequest = liveActivityRequestPromiseRef.current[requestKey];
+    if (existingRequest) {
+      return existingRequest;
     }
 
-    const liveGameSummaries = buildGameSummaryActivities(liveGames);
+    const requestPromise = (async () => {
+      const scoreboardResp = await apiClient.get(API.ESPN_ALL, {
+        params: { d: todayStr },
+      });
 
-    const gamePayloads = await Promise.all(
-      liveGames.map(async (game) => {
-        try {
-          const response = await apiClient.get(`${API.ESPN_GAME}/${game.id}`);
-          return Array.isArray(response.data?.plays) ? response.data.plays : [];
-        } catch {
-          return [];
-        }
-      }),
-    );
+      const activeGames = filterGamesForLeague(scoreboardResp.data.games || [], leagueStr).filter(
+        (game) => game.status === "live" || game.status === "final",
+      );
 
-    const combined = gamePayloads.flat();
-    if (!combined.length) {
-      if (!liveGameSummaries.length) {
+      if (!activeGames.length) {
         return null;
       }
-      return {
-        items: liveGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
-        total: liveGameSummaries.length,
-        hasMore: liveGameSummaries.length > ACTIVITY_PAGE_SIZE,
-        allItems: liveGameSummaries,
-      } as ActivityCacheEntry;
-    }
 
-    const parsed = parseActivities(combined);
-    if (!parsed.length && liveGameSummaries.length) {
+      const activityGameSummaries = buildGameSummaryActivities(activeGames);
+
+      const gamePayloads = await Promise.allSettled(
+        activeGames.map(async (game) => {
+          const response = await apiClient.get(`${API.ESPN_GAME}/${game.id}`, { timeout: 2500 });
+          return Array.isArray(response.data?.plays) ? response.data.plays : [];
+        }),
+      );
+
+      const combined = gamePayloads.flatMap((result) => {
+        if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
+          return [];
+        }
+        return result.value;
+      });
+
+      if (!combined.length) {
+        if (!activityGameSummaries.length) {
+          return null;
+        }
+        return {
+          items: activityGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
+          total: activityGameSummaries.length,
+          hasMore: activityGameSummaries.length > ACTIVITY_PAGE_SIZE,
+          allItems: activityGameSummaries,
+        } as ActivityCacheEntry;
+      }
+
+      const parsed = parseActivities(combined, "recentFirst");
+      if (!parsed.length && activityGameSummaries.length) {
+        return {
+          items: activityGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
+          total: activityGameSummaries.length,
+          hasMore: activityGameSummaries.length > ACTIVITY_PAGE_SIZE,
+          allItems: activityGameSummaries,
+        } as ActivityCacheEntry;
+      }
+
+      const visible = parsed.slice(0, ACTIVITY_PAGE_SIZE);
       return {
-        items: liveGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
-        total: liveGameSummaries.length,
-        hasMore: liveGameSummaries.length > ACTIVITY_PAGE_SIZE,
-        allItems: liveGameSummaries,
+        items: visible,
+        total: parsed.length,
+        hasMore: parsed.length > ACTIVITY_PAGE_SIZE,
+        allItems: parsed,
       } as ActivityCacheEntry;
+    })();
+
+    liveActivityRequestPromiseRef.current[requestKey] = requestPromise;
+    try {
+      return await requestPromise;
+    } finally {
+      delete liveActivityRequestPromiseRef.current[requestKey];
     }
-    const visible = parsed.slice(0, ACTIVITY_PAGE_SIZE);
-    return {
-      items: visible,
-      total: parsed.length,
-      hasMore: parsed.length > ACTIVITY_PAGE_SIZE,
-      allItems: parsed,
-    } as ActivityCacheEntry;
   }, [buildGameSummaryActivities, parseActivities]);
 
-  /* Use a ref for the current offset so fetchActivity stays stable */
-  const offsetRef = useRef(0);
-  const activityRequestIdRef = useRef(0);
-  const activityActiveRequestsRef = useRef(0);
-  const eventsActiveRequestsRef = useRef(0);
   const latestActivityDateCacheRef = useRef<Record<string, string | null>>({});
-  const activityResponseCacheRef = useRef<Record<string, ActivityCacheEntry>>({});
+  const activityResponseCacheRef = useRef<Record<string, ActivityCacheEntry>>(
+    readSessionJson<Record<string, ActivityCacheEntry>>(ACTIVITY_CACHE_STORAGE_KEY, {}),
+  );
 
-  /* Stable fetch function — no dependency on items length */
-  const fallbackTriedRef = useRef(false);
-  const activityAutoFallbackRef = useRef(false);
+  const persistPredictionCache = useCallback(() => {
+    writeSessionJson(PREDICTION_CACHE_STORAGE_KEY, predictionCacheRef.current);
+  }, []);
+
+  const persistGameSlateCache = useCallback(() => {
+    const entries = Object.entries(gameSlateCacheRef.current);
+    const compact = Object.fromEntries(entries.slice(-10));
+    writeSessionJson(GAME_SLATE_CACHE_STORAGE_KEY, compact);
+  }, []);
+
+  const loadSlateForDate = useCallback(async (dateStr: string) => {
+    let requestPromise = eventsRequestPromiseRef.current[dateStr];
+    if (!requestPromise) {
+      requestPromise = apiClient.get(API.ESPN_ALL, {
+        params: { d: dateStr },
+      }).then((resp) => {
+        const espnGames: ESPNGame[] = resp.data.games || [];
+        const mapped = espnGames
+          .map(mapESPNGame)
+          .filter((game) => isDashboardLeague(game.leagueKey));
+        const unique = Array.from(new Map(mapped.map((g) => [g.id, g])).values());
+
+        const statusOrder: Record<string, number> = { live: 0, upcoming: 1, final: 2 };
+        unique.sort((a, b) => {
+          const sa = statusOrder[a.status] ?? 1;
+          const sb = statusOrder[b.status] ?? 1;
+          if (sa !== sb) return sa - sb;
+          const pa = LEAGUE_PRIORITY[a.leagueKey] ?? 99;
+          const pb = LEAGUE_PRIORITY[b.leagueKey] ?? 99;
+          if (pa !== pb) return pa - pb;
+          return 0;
+        });
+
+        return unique;
+      }).finally(() => {
+        delete eventsRequestPromiseRef.current[dateStr];
+      });
+      eventsRequestPromiseRef.current[dateStr] = requestPromise;
+    }
+
+    const unique = await requestPromise;
+    gameSlateCacheRef.current[dateStr] = {
+      cachedAt: Date.now(),
+      data: unique,
+    };
+    persistGameSlateCache();
+    return unique;
+  }, [persistGameSlateCache]);
+
+  const persistActivityCache = useCallback(() => {
+    const entries = Object.entries(activityResponseCacheRef.current);
+    const compact = Object.fromEntries(
+      entries.slice(-8).map(([key, entry]) => [
+        key,
+        {
+          items: entry.items,
+          total: entry.total,
+          hasMore: entry.hasMore,
+          cachedForDay: entry.cachedForDay,
+          cachedAt: entry.cachedAt,
+        } satisfies ActivityCacheEntry,
+      ]),
+    );
+    writeSessionJson(ACTIVITY_CACHE_STORAGE_KEY, compact);
+  }, []);
+
+  const setPredictionCacheEntry = useCallback((gameId: string, entry: PredictionCacheEntry) => {
+    predictionCacheRef.current[gameId] = entry;
+    persistPredictionCache();
+  }, [persistPredictionCache]);
+
+  const setActivityCacheEntry = useCallback((cacheKey: string, entry: ActivityCacheEntry) => {
+    const explicitDate = cacheKey.split("::").pop() || "";
+    activityResponseCacheRef.current[cacheKey] = {
+      ...entry,
+      cachedForDay:
+        isLiveActivityCacheKey(cacheKey) || isFutureCompactDate(explicitDate)
+          ? getCurrentActivityDay()
+          : entry.cachedForDay,
+      cachedAt: Date.now(),
+    };
+    persistActivityCache();
+  }, [persistActivityCache]);
+
   const findLatestMatchingDate = useCallback(async (matcher: (dateStr: string) => Promise<boolean>, maxDaysBack = 400) => {
     for (let offset = 1; offset <= maxDaysBack; offset += 1) {
       const candidateDate = new Date();
@@ -698,10 +1167,10 @@ export default function DashboardPage() {
     return latestGameDate;
   }, [findLatestGameDate, findLatestMatchingDate]);
 
-  const fetchGameSummaryFallback = useCallback(async (dateStr: string, leagueStr?: string) => {
+  const fetchGameSummaryFallback = useCallback(async (dateStr?: string, leagueStr?: string) => {
     try {
       const resp = await apiClient.get(API.ESPN_ALL, {
-        params: { d: dateStr },
+        params: dateStr ? { d: dateStr } : undefined,
       });
       const games = filterGamesForLeague(resp.data.games || [], leagueStr);
       return buildGameSummaryActivities(games);
@@ -710,278 +1179,305 @@ export default function DashboardPage() {
     }
   }, [buildGameSummaryActivities]);
 
-  const fetchActivity = useCallback(async (dateStr?: string, append = false, leagueStr?: string, background = false) => {
-    if (background && activityActiveRequestsRef.current > 0) {
-      return;
+  const buildFallbackActivitiesForDate = useCallback(async (
+    dateStr: string,
+    leagueStr?: string,
+    options?: { scheduleOnly?: boolean },
+  ) => {
+    const requestedLeague = (leagueStr || "ALL").toUpperCase();
+    const includeGame = (game: GameItem) => {
+      if (requestedLeague !== "ALL" && game.leagueKey !== requestedLeague) {
+        return false;
+      }
+      return options?.scheduleOnly ? game.status === "upcoming" : true;
+    };
+
+    const cachedSlate = gameSlateCacheRef.current[dateStr];
+    const cachedGames = cachedSlate?.data.filter(includeGame) ?? [];
+    if (cachedGames.length > 0) {
+      return buildDashboardGameSummaryActivities(cachedGames);
     }
 
-    const requestId = ++activityRequestIdRef.current;
-    const params: Record<string, string | number> = { limit: ACTIVITY_PAGE_SIZE };
-    if (dateStr) params.date = dateStr;
-    if (leagueStr && leagueStr !== "ALL") params.league = leagueStr;
-    if (append) params.offset = offsetRef.current;
+    try {
+      const loadedGames = (await loadSlateForDate(dateStr)).filter(includeGame);
+      if (loadedGames.length > 0) {
+        return buildDashboardGameSummaryActivities(loadedGames);
+      }
+    } catch {
+      // Fall back to the lighter summary request below.
+    }
+
+    const fallbackActivities = await fetchGameSummaryFallback(dateStr, leagueStr);
+    return options?.scheduleOnly
+      ? fallbackActivities.filter((item) => item.status === "upcoming")
+      : fallbackActivities;
+  }, [buildDashboardGameSummaryActivities, fetchGameSummaryFallback, loadSlateForDate]);
+
+  const loadActivityFeed = useCallback(async (dateStr?: string, leagueStr?: string): Promise<ActivityCacheEntry> => {
     const cacheKey = buildActivityCacheKey(dateStr, leagueStr);
-    if (!append && !background) setActivityLoading(true);
-    let handoffToFallback = false;
-
-    const cached = activityResponseCacheRef.current[cacheKey];
-    if (append && cached?.allItems) {
-      const nextCount = Math.min(cached.allItems.length, offsetRef.current + ACTIVITY_PAGE_SIZE);
-      const nextItems = cached.allItems.slice(0, nextCount);
-      activityResponseCacheRef.current[cacheKey] = {
+    const cachedEntry = activityResponseCacheRef.current[cacheKey];
+    const cached = isFreshLiveActivityEntry(cacheKey, cachedEntry) ? cachedEntry : undefined;
+    if (cached) {
+      return {
         ...cached,
-        items: nextItems,
-        hasMore: nextCount < cached.allItems.length,
+        allItems: cached.allItems ?? cached.items,
       };
-      setActivityItems(nextItems);
-      offsetRef.current = nextItems.length;
-      setActivityTotal(cached.total);
-      setActivityHasMore(nextCount < cached.allItems.length);
-      setActivityError("");
-      return;
+    }
+    if (cachedEntry) {
+      delete activityResponseCacheRef.current[cacheKey];
+      persistActivityCache();
     }
 
-    if (!append) {
-      if (cached) {
-        setActivityItems(cached.items);
-        offsetRef.current = cached.items.length;
-        setActivityTotal(cached.total);
-        setActivityHasMore(cached.hasMore);
-        setActivityError("");
-        if (dateStr) {
-          setActivityLoading(false);
-          return;
-        }
-        if (!background) {
-          setActivityLoading(false);
-        }
+    if (isFutureCompactDate(dateStr)) {
+      const scheduledGames = dateStr
+        ? await buildFallbackActivitiesForDate(dateStr, leagueStr, { scheduleOnly: true })
+        : [];
+      const entry: ActivityCacheEntry = {
+        items: scheduledGames,
+        total: scheduledGames.length,
+        hasMore: false,
+        allItems: scheduledGames,
+        effectiveDate: dateStr,
+      };
+      setActivityCacheEntry(cacheKey, entry);
+      return entry;
+    }
+
+    if (!dateStr) {
+      const liveEntry = await fetchLiveActivityDirect(leagueStr);
+      if (liveEntry) {
+        const hydratedEntry: ActivityCacheEntry = {
+          ...liveEntry,
+          allItems: liveEntry.allItems ?? liveEntry.items,
+          effectiveDate: "",
+        };
+        setActivityCacheEntry(cacheKey, hydratedEntry);
+        return hydratedEntry;
       }
     }
 
-    activityActiveRequestsRef.current += 1;
-    try {
-      if (!dateStr) {
-        const liveEntry = await fetchLiveActivityDirect(leagueStr);
-        if (requestId !== activityRequestIdRef.current) return;
-        if (liveEntry) {
-          activityResponseCacheRef.current[cacheKey] = liveEntry;
-          setActivityError("");
-          setActivityItems(liveEntry.items);
-          offsetRef.current = liveEntry.items.length;
-          setActivityTotal(liveEntry.total);
-          setActivityHasMore(liveEntry.hasMore);
-          fallbackTriedRef.current = false;
-          activityAutoFallbackRef.current = false;
-          return;
-        }
+    const requestLeague = leagueStr && leagueStr !== "ALL" ? leagueStr : undefined;
+    const requestDate = dateStr || undefined;
+    const collectedActivities: Record<string, unknown>[] = [];
+    let total = 0;
+    let offset = 0;
+
+    while (offset < 240) {
+      const params: Record<string, string | number> = {
+        limit: ACTIVITY_PAGE_SIZE,
+        offset,
+      };
+      if (requestDate) {
+        params.date = requestDate;
+      }
+      if (requestLeague) {
+        params.league = requestLeague;
       }
 
       const resp = await apiClient.get(API.ESPN_ACTIVITY, { params });
-      if (requestId !== activityRequestIdRef.current) return;
+      const activities = Array.isArray(resp.data.activities) ? resp.data.activities : [];
+      total = Math.max(total, Number(resp.data.total || 0), collectedActivities.length + activities.length);
+      collectedActivities.push(...activities);
 
-      setActivityError("");
-
-      const parsed = parseActivities(resp.data.activities || []);
-      if (append) {
-        setActivityItems((prev) => {
-          const merged = [...prev, ...parsed];
-          activityResponseCacheRef.current[cacheKey] = {
-            items: merged,
-            total: resp.data.total || merged.length,
-            hasMore: resp.data.hasMore || false,
-          };
-          offsetRef.current = merged.length;
-          return merged;
-        });
-      } else {
-        if (parsed.length === 0) {
-          if (dateStr) {
-            const fallbackGames = await fetchGameSummaryFallback(dateStr, leagueStr);
-            if (requestId !== activityRequestIdRef.current) return;
-            if (fallbackGames.length > 0) {
-              activityResponseCacheRef.current[cacheKey] = {
-                items: fallbackGames,
-                total: fallbackGames.length,
-                hasMore: false,
-              };
-              setActivityItems(fallbackGames);
-              offsetRef.current = fallbackGames.length;
-              setActivityTotal(fallbackGames.length);
-              setActivityHasMore(false);
-              return;
-            }
-          }
-
-          const shouldFindFallbackDate =
-            (!dateStr && !fallbackTriedRef.current) ||
-            (!!dateStr && activityAutoFallbackRef.current);
-          const isAutoFallbackCycle = !!dateStr && activityAutoFallbackRef.current;
-
-          if (shouldFindFallbackDate) {
-            const latestDate = await findLatestActivityDate(leagueStr);
-            if (requestId !== activityRequestIdRef.current) return;
-            fallbackTriedRef.current = true;
-            if (latestDate && latestDate !== dateStr) {
-              handoffToFallback = true;
-              activityAutoFallbackRef.current = true;
-              setActivityDate(latestDate);
-              return;
-            }
-
-            if (isAutoFallbackCycle) {
-              handoffToFallback = true;
-              activityAutoFallbackRef.current = false;
-              setActivityDate("");
-              return;
-            }
-          }
-        }
-
-        if (!dateStr && parsed.length > 0) {
-          fallbackTriedRef.current = false;
-          activityAutoFallbackRef.current = false;
-        }
-        activityResponseCacheRef.current[cacheKey] = {
-          items: parsed,
-          total: resp.data.total || parsed.length,
-          hasMore: resp.data.hasMore || false,
-        };
-        setActivityItems(parsed);
-        offsetRef.current = parsed.length;
+      const hasMore = Boolean(resp.data.hasMore);
+      if (!hasMore || activities.length === 0) {
+        break;
       }
-
-      setActivityTotal(resp.data.total || parsed.length);
-      setActivityHasMore(resp.data.hasMore || false);
-    } catch (error) {
-      if (requestId !== activityRequestIdRef.current) return;
-      const message = error instanceof Error && /network|timeout|fetch/i.test(error.message)
-        ? "Live activity is temporarily unavailable because the API server is not responding."
-        : "Live activity is temporarily unavailable right now.";
-      if (!background) {
-        setActivityError(message);
-      }
-    } finally {
-      activityActiveRequestsRef.current = Math.max(0, activityActiveRequestsRef.current - 1);
-      if (requestId === activityRequestIdRef.current && !handoffToFallback && !background) {
-        setActivityLoading(false);
+      offset += activities.length;
+      if (activities.length < ACTIVITY_PAGE_SIZE) {
+        break;
       }
     }
-  }, [fetchGameSummaryFallback, fetchLiveActivityDirect, findLatestActivityDate, parseActivities]);
 
-  /* Load more plays (pagination) */
+    const displayOrder: ActivityDisplayOrder =
+      !requestDate || requestDate === formatCompactDate(new Date()) ? "recentFirst" : "chronological";
+    const parsed = parseActivities(collectedActivities, displayOrder);
+
+    if (parsed.length === 0) {
+      if (requestDate) {
+        const fallbackGames = await buildFallbackActivitiesForDate(requestDate, leagueStr);
+        const fallbackEntry: ActivityCacheEntry = {
+          items: fallbackGames,
+          total: fallbackGames.length,
+          hasMore: false,
+          allItems: fallbackGames,
+          effectiveDate: requestDate,
+        };
+        setActivityCacheEntry(cacheKey, fallbackEntry);
+        return fallbackEntry;
+      }
+
+      const latestDate = await findLatestActivityDate(leagueStr);
+      if (latestDate && latestDate !== requestDate) {
+        const fallbackEntry = await loadActivityFeed(latestDate, leagueStr);
+        const latestEntry: ActivityCacheEntry = {
+          ...fallbackEntry,
+          effectiveDate: latestDate,
+        };
+        setActivityCacheEntry(cacheKey, latestEntry);
+        return latestEntry;
+      }
+    }
+
+    const entry: ActivityCacheEntry = {
+      items: parsed,
+      total: Math.max(total, parsed.length),
+      hasMore: false,
+      allItems: parsed,
+      effectiveDate: requestDate || "",
+    };
+    setActivityCacheEntry(cacheKey, entry);
+    return entry;
+  }, [
+    buildFallbackActivitiesForDate,
+    fetchLiveActivityDirect,
+    findLatestActivityDate,
+    parseActivities,
+    persistActivityCache,
+    setActivityCacheEntry,
+  ]);
+
+  const activityQuery = useQuery<ActivityCacheEntry>({
+    queryKey: ["dashboardActivity", activityDate || "LIVE", activityLeague],
+    queryFn: async () => loadActivityFeed(activityDate || undefined, activityLeague),
+    initialData: (() => {
+      const cacheKey = buildActivityCacheKey(activityDate || undefined, activityLeague);
+      const cachedEntry = activityResponseCacheRef.current[cacheKey];
+      if (!isFreshLiveActivityEntry(cacheKey, cachedEntry)) {
+        return undefined;
+      }
+      return {
+        ...cachedEntry,
+        allItems: cachedEntry.allItems ?? cachedEntry.items,
+      };
+    })(),
+    placeholderData: (previousData) => previousData,
+    refetchInterval: !activityDate ? LIVE_DASHBOARD_REFRESH_MS : false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+  });
+
   const loadMoreActivity = useCallback(() => {
-    fetchActivity(activityDate || undefined, true, activityLeague);
-  }, [fetchActivity, activityDate, activityLeague]);
-
-  /* Handle activity date change — just set the date, useEffect drives the fetch */
-  const handleActivityDateChange = useCallback((dateStr: string) => {
-    activityRequestIdRef.current += 1;
-    activityAutoFallbackRef.current = false;
-    fallbackTriedRef.current = false;
-    // Always set the explicit date — never clear to "" which fetches latest cached instead of today
-    setActivityDate(dateStr);
-    offsetRef.current = 0;
-    setActivityError("");
-    setActivityLoading(true);
-    setActivityHasMore(false);
+    setActivityVisibleCount((prev) => prev + ACTIVITY_PAGE_SIZE);
   }, []);
 
-  /* Single fetch driver — fires on date/league change and handles polling */
-  useEffect(() => {
-    fetchActivity(activityDate || undefined, false, activityLeague);
-    // Only auto-refresh if viewing today (activityDate is empty)
-    let interval: ReturnType<typeof setInterval> | null = null;
-    if (!activityDate) {
-      interval = setInterval(() => {
-        if (document.hidden) return;
-        fetchActivity(undefined, false, activityLeague, true);
-      }, 15000);
+  const handleActivityDateChange = useCallback((dateStr: string) => {
+    const parsedDate = dateStr ? parseCompactDate(dateStr) : new Date();
+    if (parsedDate) {
+      setSelectedDate(parsedDate);
     }
-    return () => { if (interval) clearInterval(interval); };
-  }, [activityDate, activityLeague, fetchActivity]);
+    setActivityVisibleCount(ACTIVITY_PAGE_SIZE);
+    setActivityDate(dateStr);
+  }, []);
 
-  /* Fetch ESPN events for the selected date + auto-refresh every 15s */
-  const fetchEvents = useCallback(async (silent = false) => {
-    if (silent && eventsActiveRequestsRef.current > 0) {
+  const handleSelectedDateChange = useCallback((nextDate: Date) => {
+    if (formatCompactDate(nextDate) === formatCompactDate(selectedDate)) {
       return;
     }
 
-    eventsActiveRequestsRef.current += 1;
-    if (!silent) setIsLoading(true);
-
-    const year = selectedDate.getFullYear();
-    const month = String(selectedDate.getMonth() + 1).padStart(2, "0");
-    const day = String(selectedDate.getDate()).padStart(2, "0");
-    const dateStr = `${year}${month}${day}`;
-
-    try {
-      const resp = await apiClient.get(API.ESPN_ALL, {
-        params: { d: dateStr },
-      });
-      const espnGames: ESPNGame[] = resp.data.games || [];
-      const mapped = espnGames
-        .map(mapESPNGame)
-        .filter((game) => isDashboardLeague(game.leagueKey));
-      const unique = Array.from(new Map(mapped.map((g) => [g.id, g])).values());
-
-      const statusOrder: Record<string, number> = { live: 0, upcoming: 1, final: 2 };
-      unique.sort((a, b) => {
-        const sa = statusOrder[a.status] ?? 1;
-        const sb = statusOrder[b.status] ?? 1;
-        if (sa !== sb) return sa - sb;
-        const pa = LEAGUE_PRIORITY[a.leagueKey] ?? 99;
-        const pb = LEAGUE_PRIORITY[b.leagueKey] ?? 99;
-        if (pa !== pb) return pa - pb;
-        return 0;
-      });
-
-      setGames(unique);
-      setGamesError("");
-    } catch (error) {
-      setGames([]);
-      const message = error instanceof Error && /network|timeout|fetch/i.test(error.message)
-        ? "Scores are temporarily unavailable because the API server is not responding."
-        : "Scores are temporarily unavailable right now.";
-      setGamesError(message);
-    } finally {
-      eventsActiveRequestsRef.current = Math.max(0, eventsActiveRequestsRef.current - 1);
-      setIsLoading(false);
-    }
+    const nextDateStr = formatCompactDate(nextDate);
+    const todayDateStr = formatCompactDate(new Date());
+    setSelectedDate(nextDate);
+    setActivityVisibleCount(ACTIVITY_PAGE_SIZE);
+    setIsDateSwitching(true);
+    setActivityDate(nextDateStr === todayDateStr ? "" : nextDateStr);
   }, [selectedDate]);
 
   useEffect(() => {
-    fetchEvents();
-    // Auto-refresh every 15s silently — also bump prediction tick
-    refreshRef.current = setInterval(() => {
-      fetchEvents(true);
-      setPredictionRefreshTick((t) => t + 1);
-    }, 15000);
-    return () => { if (refreshRef.current) clearInterval(refreshRef.current); };
-  }, [fetchEvents]);
+    if (!isSelectedDateToday) {
+      return;
+    }
+    const interval = setInterval(() => {
+      setPredictionRefreshTick((tick) => tick + 1);
+    }, LIVE_DASHBOARD_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [isSelectedDateToday]);
+
+  useEffect(() => {
+    const shouldPrioritizeVisibleHeadlines = !(allNewsQuery.data?.length) && allNewsQuery.isLoading;
+    const timer = window.setTimeout(() => {
+      const offsets = [-2, -1, 1, 2];
+      void Promise.allSettled(
+        offsets.map(async (offset) => {
+          const nearbyDate = new Date(selectedDate);
+          nearbyDate.setDate(selectedDate.getDate() + offset);
+          const nearbyDateStr = formatCompactDate(nearbyDate);
+          const cachedSlate = gameSlateCacheRef.current[nearbyDateStr];
+          const isCurrentDay = nearbyDateStr === formatCompactDate(new Date());
+          const ttlMs = isCurrentDay ? 30_000 : 15 * 60_000;
+
+          if (cachedSlate && Date.now() - cachedSlate.cachedAt < ttlMs) {
+            return;
+          }
+
+          await loadSlateForDate(nearbyDateStr);
+        }),
+      );
+    }, shouldPrioritizeVisibleHeadlines ? 2_500 : 900);
+
+    return () => window.clearTimeout(timer);
+  }, [allNewsQuery.data, allNewsQuery.isLoading, loadSlateForDate, selectedDate]);
 
   useEffect(() => {
     if (!games.length) {
       return;
     }
 
+    const scopedGames = (() => {
+      if (activeSport === "ALL") {
+        return games;
+      }
+      if (activeSport === "MY_TEAMS") {
+        return games.filter((game) =>
+          savedTeams.some((team) =>
+            matchesSavedTeamSide(game.homeTeam, game.leagueKey, team) ||
+            matchesSavedTeamSide(game.awayTeam, game.leagueKey, team)
+          )
+        );
+      }
+      return games.filter((game) => game.leagueKey === activeSport);
+    })();
+
+    const liveScopedGames = scopedGames.filter((game) => game.status === "live");
+    const upcomingScopedGames = scopedGames.filter((game) => game.status === "upcoming");
+    const finalScopedGames = scopedGames.filter((game) => game.status === "final");
+    const orderedScopedGames =
+      statusFilter === "live"
+        ? liveScopedGames
+        : statusFilter === "upcoming"
+          ? upcomingScopedGames
+          : statusFilter === "final"
+            ? finalScopedGames
+            : [...liveScopedGames, ...upcomingScopedGames, ...finalScopedGames];
+    const predictionTargetGames = orderedScopedGames
+      .filter((game) => supportsPredictions(game));
+
+    if (!predictionTargetGames.length) {
+      return;
+    }
+
     const now = Date.now();
     const nextState: Record<string, PredictionResult | null> = {};
-    const gamesToFetch = games.filter((game) => {
+    const gamesToFetch = predictionTargetGames.filter((game) => {
       const cached = predictionCacheRef.current[game.id];
-      // Never cache failures — always retry games that returned null
-      if (cached && cached.data === null) {
-        return true;
-      }
       const fingerprint = getPredictionCacheFingerprint(game);
+      const isRequestInFlight = predictionRequestInFlightRef.current.has(game.id);
+      // Never cache failures — always retry games that returned null
+      if (cached && cached.fingerprint === fingerprint && cached.data) {
+        // Keep the last good value on screen while a background refresh updates it.
+        nextState[game.id] = cached.data;
+      }
+      if (cached && cached.data === null) {
+        return !isRequestInFlight;
+      }
       if (
         cached
         && cached.fingerprint === fingerprint
         && now - cached.fetchedAt < getPredictionCacheTtlMs(game)
       ) {
-        nextState[game.id] = cached.data;
         return false;
       }
-      return true;
+      return !isRequestInFlight;
     });
 
     if (Object.keys(nextState).length > 0) {
@@ -993,15 +1489,32 @@ export default function DashboardPage() {
     }
 
     let cancelled = false;
+    let deferredTimer: number | null = null;
 
-    /* Fetch with a per-request timeout and concurrency limit so the
-       dashboard doesn't hang when ML predictions are slow (first signup). */
-    const PREDICTION_TIMEOUT_MS = 8_000;
+    const PREDICTION_TIMEOUT_MS = 3_500;
+    const PRIORITY_PREDICTION_COUNT = 16;
+    const PREDICTION_CHUNK_SIZE = 4;
+    const PREDICTION_BATCH_SIZE = 18;
+    const DEFERRED_PREDICTION_DELAY_MS = 150;
+    const clearPredictionLoading = (batchGames: GameItem[]) => {
+      batchGames.forEach((game) => {
+        predictionRequestInFlightRef.current.delete(game.id);
+      });
+      setPredictionsLoadingIds((prev) => {
+        const next = new Set(prev);
+        batchGames.forEach((g) => next.delete(g.id));
+        return next;
+      });
+    };
 
     /* Mark all games we're about to fetch as "loading" for the shimmer UI */
     setPredictionsLoadingIds((prev) => {
       const next = new Set(prev);
-      gamesToFetch.forEach((g) => next.add(g.id));
+      gamesToFetch.forEach((game) => {
+        if (!nextState[game.id] && !predictionsByGameRef.current[game.id]) {
+          next.add(game.id);
+        }
+      });
       return next;
     });
 
@@ -1029,24 +1542,27 @@ export default function DashboardPage() {
 
     /* Try the batch endpoint first — all predictions in one request.
        Falls back to per-game fetching if the batch endpoint fails. */
-    (async () => {
-      let batchSucceeded = false;
+    async function fetchBatch(batchGames: GameItem[]) {
+      if (!batchGames.length) {
+        return new Set<string>();
+      }
       try {
         const leagueMap: Record<string, string> = {};
-        gamesToFetch.forEach((g) => { leagueMap[g.id] = g.leagueKey; });
+        const gamesById = new Map(batchGames.map((game) => [game.id, game]));
+        batchGames.forEach((g) => { leagueMap[g.id] = g.leagueKey; });
         const batchResp = await apiClient.post(API.PREDICT_BATCH, {
-          game_ids: gamesToFetch.map((g) => g.id),
+          game_ids: batchGames.map((g) => g.id),
           leagues: leagueMap,
         }, { timeout: 20_000 });
-        if (cancelled) return;
+        if (cancelled) return new Set<string>();
         const predictions = batchResp.data?.predictions || {};
+        const fetchedGameIds = new Set<string>();
         if (Object.keys(predictions).length > 0) {
-          batchSucceeded = true;
           const updates: Record<string, PredictionResult | null> = {};
           for (const [gameId, data] of Object.entries(predictions)) {
             if (!data) continue;
             const d = data as { game_id: string; home_win_prob: number; away_win_prob: number; model_version: string };
-            const game = gamesToFetch.find((g) => g.id === gameId);
+            const game = gamesById.get(gameId);
             const fingerprint = game ? getPredictionCacheFingerprint(game) : "";
             const prediction: PredictionResult = {
               gameId: String(d.game_id),
@@ -1054,115 +1570,277 @@ export default function DashboardPage() {
               awayWinProb: Number(d.away_win_prob || 0),
               modelVersion: String(d.model_version || ""),
             };
-            predictionCacheRef.current[gameId] = {
+            setPredictionCacheEntry(gameId, {
               fetchedAt: Date.now(),
               fingerprint,
               data: prediction,
-            };
+            });
             updates[gameId] = prediction;
+            fetchedGameIds.add(gameId);
           }
           if (Object.keys(updates).length > 0) {
             setPredictionsByGame((prev) => ({ ...prev, ...updates }));
           }
+          return fetchedGameIds;
         }
       } catch {
         // Batch endpoint failed — fall back to per-game
       }
+      return new Set<string>();
+    }
 
-      /* Clear loading for batch-resolved games */
-      if (batchSucceeded) {
-        setPredictionsLoadingIds((prev) => {
-          const next = new Set(prev);
-          gamesToFetch.forEach((g) => next.delete(g.id));
-          return next;
-        });
+    async function fetchQueued(queueGames: GameItem[]) {
+      if (!queueGames.length || cancelled) {
         return;
       }
 
-      /* Fallback: per-game fetching with Promise.allSettled so one slow
-         game doesn't block the rest */
-      if (cancelled) return;
-      const results = await Promise.allSettled(gamesToFetch.map(fetchWithTimeout));
-      if (cancelled) return;
+      for (let index = 0; index < queueGames.length; index += PREDICTION_CHUNK_SIZE) {
+        if (cancelled) return;
+        const chunk = queueGames.slice(index, index + PREDICTION_CHUNK_SIZE);
+        const results = await Promise.allSettled(chunk.map(fetchWithTimeout));
+        if (cancelled) return;
 
-      const updates: Record<string, PredictionResult | null> = {};
-      results.forEach((result) => {
-        if (result.status !== "fulfilled") return;
-        const { gameId, prediction, ok } = result.value;
-        const game = gamesToFetch.find((g) => g.id === gameId);
-        if (!game) return;
-        const fingerprint = getPredictionCacheFingerprint(game);
-        if (ok) {
-          predictionCacheRef.current[gameId] = {
-            fetchedAt: Date.now(),
-            fingerprint,
-            data: prediction,
-          };
-          updates[gameId] = prediction;
+        const updates: Record<string, PredictionResult | null> = {};
+        results.forEach((result) => {
+          if (result.status !== "fulfilled") return;
+          const { gameId, prediction, ok } = result.value;
+          const game = chunk.find((g) => g.id === gameId);
+          if (!game) return;
+          const fingerprint = getPredictionCacheFingerprint(game);
+          if (ok) {
+            setPredictionCacheEntry(gameId, {
+              fetchedAt: Date.now(),
+              fingerprint,
+              data: prediction,
+            });
+            updates[gameId] = prediction;
+          }
+        });
+
+        if (Object.keys(updates).length > 0) {
+          setPredictionsByGame((prev) => ({ ...prev, ...updates }));
         }
-      });
 
-      if (Object.keys(updates).length > 0) {
-        setPredictionsByGame((prev) => ({ ...prev, ...updates }));
+        clearPredictionLoading(chunk);
       }
+    }
 
-      /* Clear all loading states */
-      setPredictionsLoadingIds((prev) => {
-        const next = new Set(prev);
-        gamesToFetch.forEach((g) => next.delete(g.id));
-        return next;
-      });
+    (async () => {
+      const priorityGames = gamesToFetch.slice(0, PRIORITY_PREDICTION_COUNT);
+      const deferredGames = gamesToFetch.slice(PRIORITY_PREDICTION_COUNT);
+
+      const loadGames = async (queueGames: GameItem[]) => {
+        for (let index = 0; index < queueGames.length; index += PREDICTION_BATCH_SIZE) {
+          if (cancelled) return;
+          const chunk = queueGames.slice(index, index + PREDICTION_BATCH_SIZE);
+          chunk.forEach((game) => {
+            predictionRequestInFlightRef.current.add(game.id);
+          });
+          const fetchedIds = await fetchBatch(chunk);
+          if (cancelled) return;
+          const remainingGames = chunk.filter((game) => !fetchedIds.has(game.id));
+          if (!remainingGames.length) {
+            clearPredictionLoading(chunk);
+            continue;
+          }
+
+          await fetchQueued(remainingGames);
+          clearPredictionLoading(chunk);
+        }
+      };
+
+      await loadGames(priorityGames);
+      if (cancelled) return;
+
+      if (deferredGames.length) {
+        deferredTimer = window.setTimeout(() => {
+          if (!cancelled) {
+            void loadGames(deferredGames);
+          }
+        }, DEFERRED_PREDICTION_DELAY_MS);
+        return;
+      }
     })();
 
     return () => {
       cancelled = true;
+      if (deferredTimer) {
+        window.clearTimeout(deferredTimer);
+      }
+      clearPredictionLoading(gamesToFetch);
     };
     // predictionRefreshTick drives periodic re-evaluation even when games array
     // reference hasn't changed (e.g. same scores on consecutive polls).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [games, predictionRefreshTick]);
+  }, [games, activeSport, savedTeams, statusFilter, predictionRefreshTick]);
 
   /* Filter by sport tab */
   const filteredGames = useMemo(() => {
     if (activeSport === "ALL") return games;
     if (activeSport === "MY_TEAMS") {
-      return games.filter((g) =>
-        savedTeamNames.some((t) =>
-          g.homeTeam.name.toLowerCase().includes(t.toLowerCase()) ||
-          g.awayTeam.name.toLowerCase().includes(t.toLowerCase())
+      return games.filter((game) =>
+        savedTeams.some((team) =>
+          matchesSavedTeamSide(game.homeTeam, game.leagueKey, team) ||
+          matchesSavedTeamSide(game.awayTeam, game.leagueKey, team)
         )
       );
     }
     return games.filter((g) => g.leagueKey === activeSport);
-  }, [games, activeSport, savedTeamNames]);
+  }, [games, activeSport, savedTeams]);
 
   /** Check if either team in a game is one of the user's saved teams */
-  const isMyTeamGame = useCallback((game: { homeTeam: { name: string }; awayTeam: { name: string } }) => {
-    if (!savedTeamNames.length) return false;
-    return savedTeamNames.some((t) =>
-      game.homeTeam.name.toLowerCase().includes(t.toLowerCase()) ||
-      game.awayTeam.name.toLowerCase().includes(t.toLowerCase())
+  const isMyTeamGame = useCallback((game: GameItem) => {
+    if (!savedTeams.length) return false;
+    return savedTeams.some((team) =>
+      matchesSavedTeamSide(game.homeTeam, game.leagueKey, team) ||
+      matchesSavedTeamSide(game.awayTeam, game.leagueKey, team)
     );
-  }, [savedTeamNames]);
+  }, [savedTeams]);
+
+  const activityQueryData = activityQuery.data;
+  const activityEffectiveDate = activityQueryData?.effectiveDate || activityDate;
+  const activityAllItems = useMemo(
+    () => activityQueryData?.allItems ?? activityQueryData?.items ?? [],
+    [activityQueryData],
+  );
+  const activityItems = useMemo(
+    () => activityAllItems.slice(0, activityVisibleCount),
+    [activityAllItems, activityVisibleCount],
+  );
+  const activityHasMore = activityAllItems.length > activityItems.length;
+  const activityTotal = activityQueryData?.total ?? activityAllItems.length;
+  const activityLoading = activityQuery.isLoading || (activityQuery.isFetching && !activityQueryData);
+  const activityError = activityQuery.error instanceof Error
+    ? /network|timeout|fetch/i.test(activityQuery.error.message)
+      ? "Live activity is temporarily unavailable because the API server is not responding."
+      : "Live activity is temporarily unavailable right now."
+    : "";
+  const activityDisplayOrder: ActivityDisplayOrder =
+    !activityEffectiveDate || activityEffectiveDate === formatCompactDate(new Date()) ? "recentFirst" : "chronological";
+  const activityLeagueFinalGames = useMemo(
+    () =>
+      games.filter(
+        (game) => game.status === "final" && (activityLeague === "ALL" || game.leagueKey === activityLeague),
+      ),
+    [activityLeague, games],
+  );
+  const normalizeActivityItemsForDisplay = useCallback((items: ActivityItem[]) => {
+    const gameLookup = new Map(games.map((game) => [game.id, game]));
+    return items.map((item) => {
+      const nextSavedState = isSavedMatchup(
+        { name: item.homeTeam, shortName: item.homeAbbr || "" },
+        { name: item.awayTeam, shortName: item.awayAbbr || "" },
+        item.league,
+      );
+      const game = gameLookup.get(item.gameId);
+      const nextStatus = game?.status || item.status;
+      const nextStatusDetail = game?.statusDetail || item.statusDetail;
+      const nextSortWallclock = item.sortWallclock || game?.scheduledAt || "";
+      if (
+        item.isSavedTeam === nextSavedState &&
+        item.status === nextStatus &&
+        item.statusDetail === nextStatusDetail &&
+        (item.sortWallclock || "") === nextSortWallclock
+      ) {
+        return item;
+      }
+      return {
+        ...item,
+        isSavedTeam: nextSavedState,
+        status: nextStatus,
+        statusDetail: nextStatusDetail,
+        sortWallclock: nextSortWallclock,
+      };
+    });
+  }, [games, isSavedMatchup]);
+  const mergeActivityFinalSummaries = useCallback((
+    items: ActivityItem[],
+    feedFullyLoaded: boolean,
+  ) => {
+    if (!activityLeagueFinalGames.length || !feedFullyLoaded) {
+      return items;
+    }
+
+    const existingFinalGameIds = new Set(
+      items
+        .filter((item) => item.status === "final")
+        .map((item) => item.gameId || item.id),
+    );
+    const missingFinalSummaries = buildDashboardGameSummaryActivities(activityLeagueFinalGames)
+      .filter((item) => !existingFinalGameIds.has(item.gameId || item.id));
+
+    if (!missingFinalSummaries.length) {
+      return items;
+    }
+
+    return sortActivitiesForDisplay(
+      [...items, ...missingFinalSummaries],
+      activityDisplayOrder,
+    );
+  }, [activityDisplayOrder, activityLeagueFinalGames, buildDashboardGameSummaryActivities]);
+  const activityFeedFullyLoaded = activityAllItems.length > 0 && !activityHasMore;
+  const displayActivityAllItems = useMemo(() => {
+    return mergeActivityFinalSummaries(
+      normalizeActivityItemsForDisplay(activityAllItems),
+      activityFeedFullyLoaded,
+    );
+  }, [
+    activityAllItems,
+    activityFeedFullyLoaded,
+    mergeActivityFinalSummaries,
+    normalizeActivityItemsForDisplay,
+  ]);
+  const displayActivityItems = useMemo(() => {
+    return mergeActivityFinalSummaries(
+      normalizeActivityItemsForDisplay(activityItems),
+      activityFeedFullyLoaded,
+    );
+  }, [
+    activityItems,
+    activityFeedFullyLoaded,
+    mergeActivityFinalSummaries,
+    normalizeActivityItemsForDisplay,
+  ]);
+  const activityDisplayTotal = useMemo(
+    () => Math.max(activityTotal, displayActivityItems.length),
+    [activityTotal, displayActivityItems.length],
+  );
 
   const visibleNewsItems = useMemo(() => {
-    const allNews = newsByLeague.ALL || [];
+    const allNews = allNewsQuery.data || [];
     if (activeSport === "ALL" || activeSport === "MY_TEAMS") {
       return allNews;
     }
 
-    if (newsByLeague[activeSport]) {
-      return newsByLeague[activeSport];
+    if (activeLeagueNewsQuery.data) {
+      return activeLeagueNewsQuery.data;
     }
 
     return allNews.filter((item) => item.league === activeSport);
-  }, [activeSport, newsByLeague]);
+  }, [activeLeagueNewsQuery.data, activeSport, allNewsQuery.data]);
+  const isNewsLoading = useMemo(() => {
+    if (activeSport === "ALL" || activeSport === "MY_TEAMS") {
+      return allNewsQuery.isLoading;
+    }
+
+    return allNewsQuery.isLoading || activeLeagueNewsQuery.isLoading;
+  }, [activeLeagueNewsQuery.isLoading, activeSport, allNewsQuery.isLoading]);
+  const showNewsSkeleton = visibleNewsItems.length === 0 && (isLoading || isNewsLoading);
+
+  useEffect(() => {
+    warmDashboardImages(visibleNewsItems.slice(0, 6).map((item) => item.imageUrl));
+  }, [visibleNewsItems]);
 
   /* Split games into sections — respecting statusFilter */
   const liveGames = statusFilter === "all" || statusFilter === "live" ? filteredGames.filter((g) => g.status === "live") : [];
   const upcomingGames = statusFilter === "all" || statusFilter === "upcoming" ? filteredGames.filter((g) => g.status === "upcoming") : [];
   const finalGames = statusFilter === "all" || statusFilter === "final" ? filteredGames.filter((g) => g.status === "final") : [];
   const noGames = liveGames.length === 0 && upcomingGames.length === 0 && finalGames.length === 0;
+  const slateTransitionClass = isDateSwitching ? "opacity-55 pointer-events-none select-none transition-opacity" : "transition-opacity";
+  const selectedDateLabel = selectedDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -1196,7 +1874,7 @@ export default function DashboardPage() {
               className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
                 statusFilter === status
                   ? status === "live"
-                    ? "bg-red-500/15 text-red-400 border border-red-500/30"
+                    ? "border-[color:var(--danger-border)] bg-[color:var(--danger-fill)] text-[color:var(--danger)]"
                     : "bg-accent/15 text-accent border border-accent/30"
                   : "bg-surface border border-muted/15 text-muted hover:text-foreground"
               }`}
@@ -1207,11 +1885,20 @@ export default function DashboardPage() {
         </div>
 
         {/* Date picker strip */}
-        <DateStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} />
+        <DateStrip selectedDate={selectedDate} onSelectDate={handleSelectedDateChange} />
+
+        {isDateSwitching && (
+          <section className="px-4 mb-4">
+            <div className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent">
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+              <span>Loading {selectedDateLabel} slate...</span>
+            </div>
+          </section>
+        )}
 
         {/* Loading state — skeleton grid instead of spinner */}
         {isLoading && (
-          <div className="px-4">
+          <section className="px-4 mb-6">
             <div className="h-5 w-24 skeleton-pulse rounded mb-3" />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {[1,2,3,4,5,6,7,8].map(i => (
@@ -1246,12 +1933,12 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
         {/* ── Live Games Section ── */}
         {!isLoading && liveGames.length > 0 && (
-          <section className="px-4 mb-6">
+          <section className={`px-4 mb-6 ${slateTransitionClass}`}>
             <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
               <LiveBadge /> Live Now
             </h2>
@@ -1280,7 +1967,7 @@ export default function DashboardPage() {
 
         {/* ── Upcoming Games Section ── */}
         {!isLoading && upcomingGames.length > 0 && (
-          <section className="px-4 mb-6">
+          <section className={`px-4 mb-6 ${slateTransitionClass}`}>
             <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
               <IconUpcoming /> Upcoming
             </h2>
@@ -1309,7 +1996,7 @@ export default function DashboardPage() {
 
         {/* ── Final Results Section ── */}
         {!isLoading && finalGames.length > 0 && (
-          <section className="px-4 mb-6">
+          <section className={`px-4 mb-6 ${slateTransitionClass}`}>
             <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
               <IconFinal /> Final Results
             </h2>
@@ -1338,9 +2025,9 @@ export default function DashboardPage() {
 
         {/* No games */}
         {!isLoading && gamesError && (
-          <section className="px-4 mb-8">
-            <div className="bg-surface border border-amber-500/20 rounded-xl p-8 text-center">
-              <p className="text-amber-200">{gamesError}</p>
+          <section className={`px-4 mb-8 ${slateTransitionClass}`}>
+            <div className="surface-note-warning rounded-xl p-8 text-center">
+              <p className="text-[color:var(--panel-text-warning)]">{gamesError}</p>
               <p className="text-muted text-sm mt-1">
                 The dashboard could not reach `http://localhost:8000`, so this is a connection issue rather than a real no-games slate.
               </p>
@@ -1349,12 +2036,43 @@ export default function DashboardPage() {
         )}
 
         {!isLoading && !gamesError && noGames && (
-          <section className="px-4 mb-8">
+          <section className={`px-4 mb-8 ${slateTransitionClass}`}>
             <div className="bg-surface border border-muted/20 rounded-xl p-8 text-center">
               <p className="text-muted">No games found for this date.</p>
               <p className="text-muted text-sm mt-1">
                 Try selecting a different date or use the calendar to jump to another day.
               </p>
+            </div>
+          </section>
+        )}
+
+        {showNewsSkeleton && (
+          <section className="px-4 mb-8">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-5 w-5 skeleton-pulse rounded" />
+              <div className="h-5 w-36 skeleton-pulse rounded" />
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="w-72 flex-shrink-0 rounded-xl border border-muted/20 bg-surface overflow-hidden"
+                >
+                  <div className="h-32 skeleton-pulse" />
+                  <div className="p-4">
+                    <div className="h-4 w-full skeleton-pulse rounded" />
+                    <div className="mt-2 h-4 w-11/12 skeleton-pulse rounded" />
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <div className="h-3 w-20 skeleton-pulse rounded" />
+                        <div className="h-1 w-1 rounded-full bg-muted/20 flex-none" />
+                        <div className="h-3 w-12 skeleton-pulse rounded" />
+                      </div>
+                      <div className="h-3 w-14 skeleton-pulse rounded" />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}
@@ -1366,7 +2084,7 @@ export default function DashboardPage() {
               <IconNews /> Sports Headlines
             </h2>
             <div className="flex gap-4 overflow-x-auto pb-2 custom-scrollbar">
-              {visibleNewsItems.map((news) => (
+              {visibleNewsItems.map((news, index) => (
                 <NewsCard
                   key={news.id}
                   headline={news.headline}
@@ -1375,6 +2093,7 @@ export default function DashboardPage() {
                   publishedAt={news.publishedAt}
                   url={news.url || undefined}
                   league={news.league}
+                  priority={index < 4}
                 />
               ))}
             </div>
@@ -1384,28 +2103,20 @@ export default function DashboardPage() {
         {/* ── Live Activity Feed ── */}
         <section className="px-4 mb-8">
           <LiveActivityFeed
-            items={activityItems}
-            activityDate={activityDate}
+            items={displayActivityItems}
+            allItems={displayActivityAllItems}
+            activityDate={activityEffectiveDate}
             onDateChange={handleActivityDateChange}
             hasMore={activityHasMore}
             onLoadMore={loadMoreActivity}
-            total={activityTotal}
+            total={activityDisplayTotal}
             loading={activityLoading}
             error={activityError}
             activeLeague={activityLeague}
+            savedTeams={savedTeams}
             onLeagueChange={(league) => {
-              activityRequestIdRef.current += 1;
-              fallbackTriedRef.current = false;
-              const shouldResetToLive = activityAutoFallbackRef.current;
-              activityAutoFallbackRef.current = false;
               setActivityLeague(league);
-              if (shouldResetToLive) {
-                setActivityDate("");
-              }
-              offsetRef.current = 0;
-              setActivityError("");
-              setActivityLoading(true);
-              setActivityHasMore(false);
+              setActivityVisibleCount(ACTIVITY_PAGE_SIZE);
             }}
           />
         </section>

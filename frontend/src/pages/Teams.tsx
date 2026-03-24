@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FiSearch } from "react-icons/fi";
 import apiClient from "../api/client";
@@ -23,6 +23,25 @@ const LEAGUE_ORDER: Record<string, number> = {
   NHL: 3, nhl: 3, Hockey: 3,
   EPL: 4, epl: 4, "English Premier League": 4, Soccer: 4,
 };
+const TEAM_DIRECTORY_CACHE_KEY = "sportsync_team_directory_v1";
+const SAVED_TEAM_DIRECTORY_CACHE_KEY = "sportsync_saved_team_directory_v1";
+
+function readSessionJson<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeSessionJson<T>(key: string, value: T): void {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota/private mode failures and keep rendering.
+  }
+}
 
 function normalizeTeam(raw: Record<string, unknown>): Team {
   return {
@@ -43,16 +62,26 @@ export default function Teams() {
   const [activeLeague, setActiveLeague] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
+  const initialTeams = useMemo(
+    () => readSessionJson<Team[]>(TEAM_DIRECTORY_CACHE_KEY, []),
+    [],
+  );
+  const initialSavedTeams = useMemo(
+    () => readSessionJson<Team[]>(SAVED_TEAM_DIRECTORY_CACHE_KEY, []),
+    [],
+  );
 
   const { data: teams = [], isLoading } = useQuery<Team[]>({
     queryKey: ["teams", "all"],
     queryFn: async () => {
       const response = await apiClient.get(API.TEAMS, {
-        params: { page: 1, page_size: 500 },
+        params: { page: 1, page_size: 160 },
       });
       return (response.data as Record<string, unknown>[]).map(normalizeTeam);
     },
-    staleTime: 300000,
+    staleTime: 600000,
+    refetchOnWindowFocus: false,
+    initialData: initialTeams.length ? initialTeams : undefined,
   });
 
   const { data: savedTeams = [] } = useQuery<Team[]>({
@@ -61,7 +90,20 @@ export default function Teams() {
       const response = await apiClient.get(API.USER_TEAMS);
       return (response.data as Record<string, unknown>[]).map(normalizeTeam);
     },
+    initialData: initialSavedTeams.length ? initialSavedTeams : undefined,
+    staleTime: 600000,
+    refetchOnWindowFocus: false,
   });
+
+  useEffect(() => {
+    if (teams.length) {
+      writeSessionJson(TEAM_DIRECTORY_CACHE_KEY, teams);
+    }
+  }, [teams]);
+
+  useEffect(() => {
+    writeSessionJson(SAVED_TEAM_DIRECTORY_CACHE_KEY, savedTeams);
+  }, [savedTeams]);
 
   const savedTeamIds = useMemo(
     () => new Set(savedTeams.map((team) => team.id)),
@@ -102,7 +144,7 @@ export default function Teams() {
       <Navbar />
 
       <main className="mx-auto max-w-7xl px-4 py-8">
-        <section className="overflow-hidden rounded-[2rem] border border-muted/15 bg-surface px-6 py-6 shadow-[0_18px_60px_rgba(5,10,25,0.22)]">
+        <section className="surface-elevated-medium overflow-hidden rounded-[2rem] border border-muted/15 bg-surface px-6 py-6">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl space-y-3">
               <span className="inline-flex rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-accent">
@@ -135,7 +177,7 @@ export default function Teams() {
               onClick={() => setActiveLeague("ALL")}
               className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
                 activeLeague === "ALL"
-                  ? "bg-accent text-foreground shadow-[0_12px_28px_rgba(46,142,255,0.18)]"
+                  ? "bg-accent text-foreground surface-accent-choice"
                   : "border border-muted/15 text-muted hover:border-accent/30 hover:text-foreground"
               }`}
             >
@@ -148,7 +190,7 @@ export default function Teams() {
                 onClick={() => setActiveLeague(sport.id)}
                 className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
                   activeLeague === sport.id
-                    ? "bg-accent text-foreground shadow-[0_12px_28px_rgba(46,142,255,0.18)]"
+                    ? "bg-accent text-foreground surface-accent-choice"
                     : "border border-muted/15 text-muted hover:border-accent/30 hover:text-foreground"
                 }`}
               >

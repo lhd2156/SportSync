@@ -100,7 +100,7 @@ export default function OnboardingStep1() {
   const inputBase =
     "w-full bg-background border text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:ring-1 focus:ring-accent/30 focus:outline-none transition-all placeholder:text-muted/40";
   const inputOk = `${inputBase} border-muted/20`;
-  const inputErr = `${inputBase} border-red-500/60`;
+const inputErr = `${inputBase} border-[color:var(--danger-strong)]/60`;
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4 py-12 animate-fadeIn">
@@ -115,7 +115,7 @@ export default function OnboardingStep1() {
 
         <form onSubmit={handleSubmit} noValidate className="bg-surface border border-muted/15 rounded-2xl p-6 shadow-lg shadow-black/20 space-y-4">
           {errors.api && (
-            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
+          <div className="surface-error-card text-sm rounded-lg px-4 py-3">
               {errors.api}
             </div>
           )}
@@ -134,7 +134,7 @@ export default function OnboardingStep1() {
                 className={errors.firstName ? inputErr : inputOk}
                 placeholder="First"
               />
-              {errors.firstName && <p className="text-red-400 text-xs mt-1">{errors.firstName}</p>}
+            {errors.firstName && <p className="surface-status-negative text-xs mt-1">{errors.firstName}</p>}
             </div>
             <div>
               <label htmlFor="onb-last" className="block text-sm text-muted mb-1">
@@ -148,7 +148,7 @@ export default function OnboardingStep1() {
                 className={errors.lastName ? inputErr : inputOk}
                 placeholder="Last"
               />
-              {errors.lastName && <p className="text-red-400 text-xs mt-1">{errors.lastName}</p>}
+            {errors.lastName && <p className="surface-status-negative text-xs mt-1">{errors.lastName}</p>}
             </div>
           </div>
 
@@ -168,7 +168,7 @@ export default function OnboardingStep1() {
                 placeholder="your_handle"
               />
             </div>
-            {errors.displayName && <p className="text-red-400 text-xs mt-1">{errors.displayName}</p>}
+            {errors.displayName && <p className="surface-status-negative text-xs mt-1">{errors.displayName}</p>}
           </div>
 
           {/* Date of Birth — text input with inline calendar */}
@@ -199,7 +199,7 @@ export default function OnboardingStep1() {
               </div>
             </div>
             {errors.dob ? (
-              <p className="text-red-400 text-xs mt-1">{errors.dob}</p>
+          <p className="surface-status-negative text-xs mt-1">{errors.dob}</p>
             ) : (
               <p className="text-xs text-muted/50 mt-1">You must be 18 or older to use SportSync</p>
             )}

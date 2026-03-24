@@ -8,10 +8,10 @@
 import { useState, useRef, useEffect } from "react";
 import { getShortDayName, isSameDay } from "../utils/dates";
 
-interface DateStripProps {
+type DateStripProps = {
   selectedDate: Date;
   onSelectDate: (date: Date) => void;
-}
+};
 
 function generateDates(centerDate: Date, range: number = 9): Date[] {
   const dates: Date[] = [];

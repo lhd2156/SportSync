@@ -1,22 +1,33 @@
 /**
  * SportSync - Settings Page
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 import { useAuth } from "../context/AuthContext";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import SafeAvatar from "../components/SafeAvatar";
+import UserAvatarFallback from "../components/UserAvatarFallback";
 import apiClient from "../api/client";
 import { API, ROUTES, SUPPORTED_SPORTS } from "../constants";
+import type { LeagueKey, SavedTeamResponse, TeamCatalogResponse, TeamGroup, TeamGroupsResponse, TeamItem } from "../types";
+import { getApiErrorMessage } from "../utils/http";
 
 const inputCls =
-  "w-full rounded-2xl border border-[#263452] bg-[#0d1322]/90 px-4 py-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 placeholder:text-muted/55";
+  "surface-input-base w-full rounded-2xl px-4 py-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20 placeholder:text-muted/55";
 const readOnlyCls =
-  "w-full rounded-2xl border border-[#202c47] bg-[#0a1120]/70 px-4 py-3 text-sm text-muted/80";
+  "surface-input-base w-full rounded-2xl px-4 py-3 text-sm text-muted/80";
 const cardCls =
-  "relative overflow-hidden rounded-[28px] border border-[#24314d] bg-[linear-gradient(180deg,rgba(15,21,35,0.96),rgba(10,16,27,0.96))] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.28)]";
+  "surface-card relative overflow-hidden rounded-[28px] p-6";
+const settingsPanelCls = "surface-panel rounded-3xl p-5";
+const settingsSubpanelCls = "surface-subpanel rounded-2xl p-4";
+const settingsActivePillCls = "surface-pill-active text-white";
+const settingsInactivePillCls = "surface-pill-inactive text-muted hover:border-panel-border-strong hover:text-foreground";
+const settingsFilterOptionCls = "surface-pill-filter text-muted hover:border-panel-border-strong hover:text-foreground";
+const settingsTeamCardActiveCls = "surface-team-card-active";
+const settingsTeamCardInactiveCls = "surface-team-card-inactive hover:border-panel-border-strong hover:bg-panel";
 
 const LEAGUE_API_MAP = {
   NFL: "NFL",
@@ -27,74 +38,49 @@ const LEAGUE_API_MAP = {
 } as const;
 
 const LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
-type LeagueKey = (typeof LEAGUE_ORDER)[number];
+const SAVED_TEAMS_LOCAL_STORAGE_KEY = "sportsync_saved_teams";
+const SAVED_TEAMS_SESSION_CACHE_KEY = "sportsync_saved_team_directory_v1";
 const DEFAULT_PROFILE_FIRST_NAME = "John";
 const DEFAULT_PROFILE_LAST_NAME = "Doe";
+const NAME_PATTERN = /^[A-Za-z]+$/;
+const DISPLAY_HANDLE_PATTERN = /^[A-Za-z0-9_]+$/;
 
-interface SportsDBTeam {
-  idTeam: string;
-  strTeam: string;
-  strTeamShort: string;
-  strBadge: string;
-}
-
-interface TeamItem {
-  id: string;
-  requestId: string;
-  dbId?: string;
-  name: string;
-  shortName: string;
-  league: LeagueKey;
-  logo: string;
-}
-
-interface SavedTeamResponse {
-  id: string;
-  external_id?: string;
-  name: string;
-  short_name?: string;
-  sport?: string;
-  league?: string;
-  logo_url?: string;
-  city?: string;
-}
-
-interface TeamCatalogResponse {
-  id: string;
-  external_id?: string;
-  name: string;
-  short_name?: string;
-  league?: string;
-  sport?: string;
-  logo_url?: string;
-  city?: string;
-}
-
-interface TeamGroup {
-  name: string;
-  teams: string[];
-  teamIds: string[];
-}
-
-interface TeamGroupsResponse {
-  groups?: TeamGroup[];
-}
-
-function initialsFor(firstName: string, lastName: string): string {
-  const parts = [firstName.trim(), lastName.trim()].filter(Boolean);
-  if (parts.length < 2) return "JD";
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("");
-}
+type UserProfileApiResponse = {
+  email?: string;
+  first_name?: string;
+  last_name?: string;
+  display_name?: string;
+  gender?: string | null;
+  profile_picture_url?: string | null;
+  sports?: string[];
+  provider?: string | null;
+  created_at?: string;
+  has_password?: boolean;
+};
 
 function buildPreviewName(firstName: string, lastName: string): string {
-  const fullName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
-  if (!firstName.trim() || !lastName.trim()) {
+  const normalizedFirstName = firstName.trim();
+  const normalizedLastName = lastName.trim();
+  const fullName = [normalizedFirstName, normalizedLastName]
+    .filter((part) => NAME_PATTERN.test(part))
+    .join(" ");
+  if (!NAME_PATTERN.test(normalizedFirstName) || !NAME_PATTERN.test(normalizedLastName)) {
     return `${DEFAULT_PROFILE_FIRST_NAME} ${DEFAULT_PROFILE_LAST_NAME}`;
   }
   return fullName || `${DEFAULT_PROFILE_FIRST_NAME} ${DEFAULT_PROFILE_LAST_NAME}`;
+}
+
+function sanitizeNameInput(value: string): string {
+  return value.replace(/[^A-Za-z]/g, "");
+}
+
+function sanitizeDisplayHandleInput(value: string): string {
+  return value.replace(/[^A-Za-z0-9_]/g, "");
+}
+
+function buildDisplayHandlePreview(value: string): string {
+  const normalized = sanitizeDisplayHandleInput(value).trim();
+  return normalized || "johndoe";
 }
 
 function formatProvider(provider: string | null, hasPassword: boolean): string {
@@ -105,6 +91,85 @@ function formatProvider(provider: string | null, hasPassword: boolean): string {
 
 function normalizeTeamName(value: string): string {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+}
+
+function buildSavedTeamsSnapshot(teams: TeamItem[]): SavedTeamResponse[] {
+  return teams.map((team) => ({
+    id: team.dbId || team.id,
+    external_id: team.requestId || team.id,
+    name: team.name,
+    short_name: team.shortName,
+    sport: team.league,
+    league: team.league,
+    logo_url: team.logo || "",
+  }));
+}
+
+function readSavedTeamsSnapshot(): SavedTeamResponse[] {
+  try {
+    const sessionRaw = sessionStorage.getItem(SAVED_TEAMS_SESSION_CACHE_KEY);
+    if (sessionRaw) {
+      const parsed = JSON.parse(sessionRaw);
+      if (Array.isArray(parsed)) {
+        return parsed as SavedTeamResponse[];
+      }
+    }
+  } catch {
+    // Ignore session cache failures and try local storage next.
+  }
+
+  try {
+    const localRaw = localStorage.getItem(SAVED_TEAMS_LOCAL_STORAGE_KEY);
+    if (localRaw) {
+      const parsed = JSON.parse(localRaw);
+      if (Array.isArray(parsed)) {
+        return parsed as SavedTeamResponse[];
+      }
+    }
+  } catch {
+    // Ignore local cache failures and fall back to an empty snapshot.
+  }
+
+  return [];
+}
+
+function mapSavedTeams(data: SavedTeamResponse[]): TeamItem[] {
+  return data
+    .map((team): TeamItem | null => {
+      const league = resolveLeagueKey(team.league || team.sport);
+      if (!league) return null;
+      return {
+        id: (team.external_id || team.id || "").trim(),
+        requestId: (team.external_id || team.id || "").trim(),
+        dbId: (team.id || "").trim() || undefined,
+        name: team.name || "",
+        shortName: team.short_name || team.name?.slice(0, 3)?.toUpperCase() || "TEAM",
+        league,
+        logo: team.logo_url || "",
+      } satisfies TeamItem;
+    })
+    .filter((team): team is TeamItem => Boolean(team && team.id && team.name))
+    .sort(byLeagueAndName);
+}
+
+function mapTeamsCatalog(data: TeamCatalogResponse[]): TeamItem[] {
+  return data
+    .map((team): TeamItem | null => {
+      const league = resolveLeagueKey(team.league || team.sport);
+      const requestId = (team.external_id || team.id || "").trim();
+      if (!league || !requestId) return null;
+      return {
+        id: requestId,
+        requestId,
+        dbId: (team.id || "").trim() || undefined,
+        name: team.name || "",
+        shortName: team.short_name || team.name?.slice(0, 3)?.toUpperCase() || "TEAM",
+        league,
+        logo: team.logo_url || "",
+      } satisfies TeamItem;
+    })
+    .filter((team): team is TeamItem => Boolean(team && team.id && team.name))
+    .sort(byLeagueAndName);
 }
 
 function resolveLeagueKey(value: string | null | undefined): LeagueKey | null {
@@ -118,6 +183,13 @@ function resolveLeagueKey(value: string | null | undefined): LeagueKey | null {
 
   if (normalizedValue.includes("premier")) return "EPL";
   return null;
+}
+
+function byLeagueAndName(left: TeamItem, right: TeamItem): number {
+  const leftIndex = LEAGUE_ORDER.indexOf(left.league);
+  const rightIndex = LEAGUE_ORDER.indexOf(right.league);
+  if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+  return left.name.localeCompare(right.name);
 }
 
 function getFilterTitle(league: LeagueKey | null): string {
@@ -187,7 +259,6 @@ function Section({
 }) {
   return (
     <section className={`${cardCls} ${accent}`}>
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(10,121,255,0.08),transparent_34%)]" />
       <div className="relative">
         <p className="text-[11px] uppercase tracking-[0.28em] text-accent/80">{eyebrow}</p>
         <h2 className="mt-2 text-xl font-semibold text-foreground">{title}</h2>
@@ -200,7 +271,7 @@ function Section({
 
 function InfoPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-[#24324d] bg-[#09111d]/75 px-4 py-3">
+                    <div className="rounded-2xl border border-panel-border-tonal bg-panel-tonal/75 px-4 py-3">
       <p className="text-[11px] uppercase tracking-[0.18em] text-muted/70">{label}</p>
       <p className="mt-1 text-sm font-medium text-foreground">{value}</p>
     </div>
@@ -229,7 +300,7 @@ function TeamFilterPanel({
   const canClear = selectedGroups.length > 0;
 
   return (
-    <div className="rounded-2xl border border-[#24314d] bg-[#09111d]/75 p-4">
+    <div className={`${settingsSubpanelCls} min-h-[12.5rem]`}>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.24em] text-muted/65">
@@ -252,7 +323,7 @@ function TeamFilterPanel({
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((item) => (
-            <div key={item} className="h-10 animate-pulse rounded-xl border border-muted/10 bg-background/40" />
+                  <div key={item} className="h-10 animate-pulse rounded-xl border border-panel-border-muted bg-panel-fill-subtle" />
           ))}
         </div>
       ) : groups.length > 0 ? (
@@ -266,8 +337,8 @@ function TeamFilterPanel({
                 onClick={() => onToggleGroup(group.name)}
                 className={`rounded-xl border px-3 py-2 text-left text-sm transition-all ${
                   isActive
-                    ? "border-accent bg-accent text-white shadow-[0_0_0_1px_rgba(46,142,255,0.16)]"
-                    : "border-muted/15 bg-background/40 text-muted hover:border-muted/30 hover:text-foreground"
+                    ? settingsActivePillCls
+                    : settingsFilterOptionCls
                 }`}
               >
                 {group.name}
@@ -285,7 +356,10 @@ function TeamFilterPanel({
 export default function SettingsPage() {
   const { user, refreshAuth, logout } = useAuth();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const hasHydratedSportsRef = useRef(false);
+  const sportsSaveRequestRef = useRef(0);
   const [showFeedDNA, setShowFeedDNA] = useState<boolean>(() => {
     if (typeof window === "undefined") return true;
     return window.localStorage.getItem("settings-hide-feed-dna") !== "true";
@@ -301,14 +375,8 @@ export default function SettingsPage() {
   const [provider, setProvider] = useState<string | null>(user?.provider || null);
   const [createdAt, setCreatedAt] = useState(user?.createdAt || "");
   const [hasPassword, setHasPassword] = useState(Boolean(user?.hasPassword));
-
-  const [savedTeamIds, setSavedTeamIds] = useState<string[]>([]);
-  const [savedTeams, setSavedTeams] = useState<TeamItem[]>([]);
-  const [teamsCatalog, setTeamsCatalog] = useState<TeamItem[]>([]);
   const [activeTeamLeague, setActiveTeamLeague] = useState<LeagueKey | null>("NFL");
   const [selectedGroupNames, setSelectedGroupNames] = useState<string[]>([]);
-  const [groupsByLeague, setGroupsByLeague] = useState<Partial<Record<LeagueKey, TeamGroup[]>>>({});
-  const [groupLoadingLeague, setGroupLoadingLeague] = useState<LeagueKey | null>(null);
   const [teamSearchQuery, setTeamSearchQuery] = useState("");
 
   const [loadMsg, setLoadMsg] = useState("");
@@ -322,9 +390,8 @@ export default function SettingsPage() {
   const [passwordMsg, setPasswordMsg] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [deleteError, setDeleteError] = useState("");
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [isLoadingTeams, setIsLoadingTeams] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [isSavingFeedSetup, setIsSavingFeedSetup] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -337,141 +404,207 @@ export default function SettingsPage() {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
-  async function loadSavedTeams() {
+  function syncSavedTeamsSnapshot(nextSavedTeams: TeamItem[]) {
+    const snapshot = buildSavedTeamsSnapshot(nextSavedTeams);
+    queryClient.setQueryData(["savedTeams"], snapshot);
     try {
-      const response = await apiClient.get(API.USER_TEAMS);
-      const nextSavedTeams: TeamItem[] = (Array.isArray(response.data) ? response.data : [])
-        .map((team: SavedTeamResponse) => {
-          const league = resolveLeagueKey(team.league || team.sport);
-          if (!league) return null;
-          return {
-            id: (team.external_id || team.id || "").trim(),
-            requestId: (team.external_id || team.id || "").trim(),
-            dbId: (team.id || "").trim(),
-            name: team.name || "",
-            shortName: team.short_name || team.name?.slice(0, 3)?.toUpperCase() || "TEAM",
-            league,
-            logo: team.logo_url || "",
-          };
-        })
-        .filter((team): team is TeamItem => Boolean(team?.id && team?.name))
-        .sort((left, right) => {
-          const leftIndex = LEAGUE_ORDER.indexOf(left.league);
-          const rightIndex = LEAGUE_ORDER.indexOf(right.league);
-          if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-          return left.name.localeCompare(right.name);
-        });
-
-      setSavedTeams(nextSavedTeams);
-      setSavedTeamIds(nextSavedTeams.map((team) => team.id));
-      setTeamsLoadMsg("");
+      sessionStorage.setItem(SAVED_TEAMS_SESSION_CACHE_KEY, JSON.stringify(snapshot));
     } catch {
-      setTeamsLoadMsg("Saved team controls will sync once the backend finishes loading.");
+      // Ignore session storage failures and keep the app interactive.
     }
-  }
-
-  async function loadTeamsCatalog() {
     try {
-      const response = await apiClient.get<TeamCatalogResponse[]>(API.TEAMS, {
-        params: { page_size: 500 },
-      });
-
-      const nextCatalog = (Array.isArray(response.data) ? response.data : [])
-        .map((team) => {
-          const league = resolveLeagueKey(team.league || team.sport);
-          const requestId = (team.external_id || team.id || "").trim();
-          if (!league || !requestId) return null;
-          return {
-            id: requestId,
-            requestId,
-            dbId: (team.id || "").trim(),
-            name: team.name || "",
-            shortName: team.short_name || team.name?.slice(0, 3)?.toUpperCase() || "TEAM",
-            league,
-            logo: team.logo_url || "",
-          } satisfies TeamItem;
-        })
-        .filter((team): team is TeamItem => Boolean(team?.id && team?.name))
-        .sort((left, right) => {
-          const leftIndex = LEAGUE_ORDER.indexOf(left.league);
-          const rightIndex = LEAGUE_ORDER.indexOf(right.league);
-          if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-          return left.name.localeCompare(right.name);
-        });
-
-      setTeamsCatalog(nextCatalog);
-      if (nextCatalog.length === 0) {
-        setTeamsLoadMsg("Team setup is temporarily unavailable. Retry once the backend is ready.");
-      } else {
-        setTeamsLoadMsg("");
-      }
+      localStorage.setItem(SAVED_TEAMS_LOCAL_STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
-      setTeamsLoadMsg("Team setup is temporarily unavailable. Retry once the backend is ready.");
+      // Ignore local storage failures and keep the app interactive.
     }
   }
-
-  async function loadTeamSelectionData() {
-    setIsLoadingTeams(true);
-    setTeamsLoadMsg("");
-    setTeamSelectionError("");
-    await Promise.all([loadSavedTeams(), loadTeamsCatalog()]);
-    setIsLoadingTeams(false);
-  }
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadProfile() {
-    if (user) {
-        setEmail(user.email || "");
-        setFirstName(user.firstName || "");
-        setLastName(user.lastName || "");
-        setDisplayHandle(user.displayName || "");
-        setGender(user.gender || "");
-        setProfilePictureUrl(user.profilePictureUrl || "");
-        setSelectedSports(user.sports || []);
-        setProvider(user.provider || null);
-        setCreatedAt(user.createdAt || "");
-        setHasPassword(Boolean(user.hasPassword));
-      }
-
-      try {
-        setLoadMsg("");
-        const response = await apiClient.get(API.USER_PROFILE);
-        if (!active) return;
-        const data = response.data || {};
-        setEmail(data.email || "");
-        setFirstName(data.first_name || "");
-        setLastName(data.last_name || "");
-        setDisplayHandle(data.display_name || "");
-        setGender(data.gender || "");
-        setProfilePictureUrl(data.profile_picture_url || "");
-        setSelectedSports(Array.isArray(data.sports) ? data.sports : []);
-        setProvider(data.provider || null);
-        setCreatedAt(data.created_at || "");
-        setHasPassword(Boolean(data.has_password));
-      } catch {
-        if (!active) return;
-        setLoadMsg("Using the current session snapshot. Some account details may refresh after the backend catches up.");
-      } finally {
-        if (active) setIsLoadingProfile(false);
-      }
+  const fallbackProfile = useMemo<UserProfileApiResponse | undefined>(() => {
+    if (!user) {
+      return undefined;
     }
 
-    void loadProfile();
-    return () => {
-      active = false;
+    return {
+      email: user.email,
+      first_name: user.firstName,
+      last_name: user.lastName,
+      display_name: user.displayName,
+      gender: user.gender,
+      profile_picture_url: user.profilePictureUrl,
+      sports: user.sports,
+      provider: user.provider,
+      created_at: user.createdAt,
+      has_password: user.hasPassword,
     };
   }, [user]);
 
+  const profileQuery = useQuery<UserProfileApiResponse>({
+    queryKey: ["userProfile"],
+    queryFn: async () => {
+      const response = await apiClient.get<UserProfileApiResponse>(API.USER_PROFILE);
+      return response.data || {};
+    },
+    initialData: fallbackProfile,
+    refetchOnWindowFocus: false,
+  });
+
+  const savedTeamsQuery = useQuery<SavedTeamResponse[]>({
+    queryKey: ["savedTeams"],
+    queryFn: async () => {
+      const response = await apiClient.get<SavedTeamResponse[]>(API.USER_TEAMS);
+      return Array.isArray(response.data) ? response.data : [];
+    },
+    initialData: readSavedTeamsSnapshot(),
+    staleTime: 600_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const teamsCatalogQuery = useQuery<TeamCatalogResponse[]>({
+    queryKey: ["teamsCatalog"],
+    queryFn: async () => {
+      const response = await apiClient.get<TeamCatalogResponse[]>(API.TEAMS, {
+        params: { page_size: 200 },
+      });
+      return Array.isArray(response.data) ? response.data : [];
+    },
+    refetchOnWindowFocus: false,
+  });
+
+  const teamGroupsQuery = useQuery<TeamGroupsResponse>({
+    queryKey: ["teamGroups", activeTeamLeague],
+    queryFn: async () => {
+      const response = await apiClient.get<TeamGroupsResponse>("/api/sports/team-groups", {
+        params: { league: activeTeamLeague },
+      });
+      return response.data || {};
+    },
+    enabled: Boolean(activeTeamLeague),
+    staleTime: 900_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const savedTeams = useMemo(
+    () => mapSavedTeams(savedTeamsQuery.data || []),
+    [savedTeamsQuery.data],
+  );
+  const savedTeamIds = useMemo(
+    () => savedTeams.map((team) => team.id),
+    [savedTeams],
+  );
+  const teamsCatalog = useMemo(
+    () => mapTeamsCatalog(teamsCatalogQuery.data || []),
+    [teamsCatalogQuery.data],
+  );
+  const isLoadingProfile = profileQuery.isLoading;
+  const isLoadingTeams = savedTeamsQuery.isLoading || teamsCatalogQuery.isLoading;
+
   useEffect(() => {
-    void loadTeamSelectionData();
-  }, []);
+    const data = profileQuery.data;
+    if (!data) {
+      return;
+    }
+
+    setEmail(data.email || "");
+    setFirstName(sanitizeNameInput(data.first_name || ""));
+    setLastName(sanitizeNameInput(data.last_name || ""));
+    setDisplayHandle(sanitizeDisplayHandleInput(data.display_name || ""));
+    setGender(data.gender || "");
+    setProfilePictureUrl(data.profile_picture_url || "");
+    setSelectedSports(Array.isArray(data.sports) ? data.sports : []);
+    setProvider(data.provider || null);
+    setCreatedAt(data.created_at || "");
+    setHasPassword(Boolean(data.has_password));
+  }, [profileQuery.data]);
+
+  useEffect(() => {
+    if (profileQuery.isError) {
+      setLoadMsg("Using the current session snapshot. Some account details may refresh after the backend catches up.");
+      return;
+    }
+
+    setLoadMsg("");
+  }, [profileQuery.isError]);
+
+  useEffect(() => {
+    syncSavedTeamsSnapshot(savedTeams);
+  }, [savedTeams]);
+
+  useEffect(() => {
+    if (savedTeamsQuery.isError) {
+      setTeamsLoadMsg("Saved team controls will sync once the backend finishes loading.");
+      return;
+    }
+
+    if (teamsCatalogQuery.isError || teamsCatalog.length === 0) {
+      setTeamsLoadMsg("Team setup is temporarily unavailable. Retry once the backend is ready.");
+      return;
+    }
+
+    setTeamsLoadMsg("");
+  }, [savedTeamsQuery.isError, teamsCatalog, teamsCatalogQuery.isError]);
+
+  useEffect(() => {
+    if (!showDelete) {
+      return;
+    }
+
+    setDeleteConfirmText("");
+    setDeletePassword("");
+    setDeleteError("");
+  }, [showDelete]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     window.localStorage.setItem("settings-hide-feed-dna", String(!showFeedDNA));
   }, [showFeedDNA]);
+
+  useEffect(() => {
+    if (isLoadingProfile) {
+      return;
+    }
+
+    if (!hasHydratedSportsRef.current) {
+      hasHydratedSportsRef.current = true;
+      return;
+    }
+
+    const requestId = sportsSaveRequestRef.current + 1;
+    sportsSaveRequestRef.current = requestId;
+    setFeedSetupMsg("");
+    setFeedSetupError("");
+    setIsSavingFeedSetup(true);
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await apiClient.put(API.USER_PROFILE, {
+            sports: selectedSports,
+          });
+
+          if (sportsSaveRequestRef.current !== requestId) {
+            return;
+          }
+
+          setFeedSetupMsg(
+            selectedSports.length
+              ? "Dashboard focus updates automatically."
+              : "Dashboard will stay on All by default.",
+          );
+        } catch (error) {
+          if (sportsSaveRequestRef.current !== requestId) {
+            return;
+          }
+
+          setFeedSetupError(getApiErrorMessage(error, "Could not update dashboard focus."));
+        } finally {
+          if (sportsSaveRequestRef.current === requestId) {
+            setIsSavingFeedSetup(false);
+          }
+        }
+      })();
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isLoadingProfile, selectedSports]);
 
   const availableLeagues = LEAGUE_ORDER.filter((league) => teamsCatalog.some((team) => team.league === league));
 
@@ -488,47 +621,6 @@ export default function SettingsPage() {
     }
   }, [teamsCatalog.length]);
 
-  useEffect(() => {
-    if (!activeTeamLeague || groupsByLeague[activeTeamLeague] !== undefined) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchGroups() {
-      setGroupLoadingLeague(activeTeamLeague);
-
-      try {
-        const response = await apiClient.get<TeamGroupsResponse>("/api/sports/team-groups", {
-          params: { league: activeTeamLeague },
-        });
-
-        if (!cancelled) {
-          setGroupsByLeague((current) => ({
-            ...current,
-            [activeTeamLeague]: response.data.groups || [],
-          }));
-        }
-      } catch {
-        if (!cancelled) {
-          setGroupsByLeague((current) => ({
-            ...current,
-            [activeTeamLeague]: [],
-          }));
-        }
-      } finally {
-        if (!cancelled) {
-          setGroupLoadingLeague((current) => (current === activeTeamLeague ? null : current));
-        }
-      }
-    }
-
-    void fetchGroups();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTeamLeague, groupsByLeague]);
-
   function toggleSport(id: string) {
     setSelectedSports((previous) =>
       previous.includes(id) ? previous.filter((sportId) => sportId !== id) : [...previous, id],
@@ -536,12 +628,41 @@ export default function SettingsPage() {
   }
 
   function openAvatarPicker() {
-    fileInputRef.current?.click();
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  }
+
+  async function persistProfilePicture(nextProfilePictureUrl: string, successMessage: string) {
+    const previousProfilePictureUrl = profilePictureUrl;
+    setProfileMsg("");
+    setProfileError("");
+    setProfilePictureUrl(nextProfilePictureUrl);
+    setIsSavingAvatar(true);
+
+    try {
+      await apiClient.put(API.USER_PROFILE, {
+        profile_picture_url: nextProfilePictureUrl.trim(),
+      });
+      await profileQuery.refetch();
+      await refreshAuth();
+      setProfileMsg(successMessage);
+    } catch (error) {
+      setProfilePictureUrl(previousProfilePictureUrl);
+      setProfileError(getApiErrorMessage(error, "Could not update avatar."));
+    } finally {
+      setIsSavingAvatar(false);
+    }
   }
 
   function onAvatarFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+
+    event.target.value = "";
+    setProfileMsg("");
+    setProfileError("");
 
     if (!file.type.startsWith("image/")) {
       setProfileError("Choose an image file for the profile picture.");
@@ -552,18 +673,39 @@ export default function SettingsPage() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = typeof reader.result === "string" ? reader.result : "";
-      setProfilePictureUrl(result);
-      setProfileError("");
-      setProfileMsg("Avatar staged. Save profile to publish it.");
-    };
-    reader.onerror = () => {
-      setProfileError("Could not read that image.");
-    };
-    reader.readAsDataURL(file);
-    event.target.value = "";
+    const previewUrl = URL.createObjectURL(file);
+    const previousProfilePictureUrl = profilePictureUrl;
+    setProfilePictureUrl(previewUrl);
+    setIsSavingAvatar(true);
+
+    void (async () => {
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await apiClient.post(API.USER_PROFILE_AVATAR, formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
+
+        const nextProfilePictureUrl =
+          typeof response.data?.profile_picture_url === "string"
+            ? response.data.profile_picture_url
+            : previousProfilePictureUrl;
+
+        setProfilePictureUrl(nextProfilePictureUrl);
+        await profileQuery.refetch();
+        await refreshAuth();
+        setProfileMsg("Avatar updated.");
+      } catch (error) {
+        setProfilePictureUrl(previousProfilePictureUrl);
+        setProfileError(getApiErrorMessage(error, "Could not update avatar."));
+      } finally {
+        URL.revokeObjectURL(previewUrl);
+        setIsSavingAvatar(false);
+      }
+    })();
   }
 
   async function handleProfileSave(event: FormEvent) {
@@ -575,8 +717,16 @@ export default function SettingsPage() {
       setProfileError("First and last name are both required.");
       return;
     }
+    if (!NAME_PATTERN.test(firstName.trim()) || !NAME_PATTERN.test(lastName.trim())) {
+      setProfileError("First and last name can only contain letters.");
+      return;
+    }
     if (!displayHandle.trim()) {
       setProfileError("Display handle is required.");
+      return;
+    }
+    if (!DISPLAY_HANDLE_PATTERN.test(displayHandle.trim())) {
+      setProfileError("Display handle can only use letters, numbers, and underscores.");
       return;
     }
 
@@ -590,33 +740,13 @@ export default function SettingsPage() {
         profile_picture_url: profilePictureUrl.trim(),
         sports: selectedSports,
       });
+      await profileQuery.refetch();
       await refreshAuth();
       setProfileMsg("Profile updated.");
-    } catch (error: any) {
-      setProfileError(error?.response?.data?.detail || "Could not save profile.");
+    } catch (error) {
+      setProfileError(getApiErrorMessage(error, "Could not save profile."));
     } finally {
       setIsSavingProfile(false);
-    }
-  }
-
-  async function handleFeedSetupSave() {
-    setFeedSetupMsg("");
-    setFeedSetupError("");
-    setIsSavingFeedSetup(true);
-    try {
-      await apiClient.put(API.USER_PROFILE, {
-        sports: selectedSports,
-      });
-      await refreshAuth();
-      setFeedSetupMsg(
-        selectedSports.length
-          ? "Dashboard focus updated."
-          : "Dashboard focus cleared. Feed will stay on All by default.",
-      );
-    } catch (error: any) {
-      setFeedSetupError(error?.response?.data?.detail || "Could not update dashboard setup.");
-    } finally {
-      setIsSavingFeedSetup(false);
     }
   }
 
@@ -650,8 +780,8 @@ export default function SettingsPage() {
       setNewPassword("");
       setConfirmPassword("");
       setPasswordMsg(hasPassword ? "Password updated." : "Password created.");
-    } catch (error: any) {
-      setPasswordError(error?.response?.data?.detail || "Could not update password.");
+    } catch (error) {
+      setPasswordError(getApiErrorMessage(error, "Could not update password."));
     } finally {
       setIsSavingPassword(false);
     }
@@ -678,8 +808,8 @@ export default function SettingsPage() {
       });
       await logout();
       navigate(ROUTES.LOGIN, { replace: true });
-    } catch (error: any) {
-      setDeleteError(error?.response?.data?.detail || "Could not delete account.");
+    } catch (error) {
+      setDeleteError(getApiErrorMessage(error, "Could not delete account."));
     } finally {
       setIsDeletingAccount(false);
     }
@@ -689,9 +819,7 @@ export default function SettingsPage() {
     if (isTogglingTeamId === team.id) return;
 
     const isSaved = savedTeamIds.includes(team.id);
-    const previousSavedIds = savedTeamIds;
     const previousSavedTeams = savedTeams;
-    const nextSavedIds = isSaved ? savedTeamIds.filter((savedId) => savedId !== team.id) : [...savedTeamIds, team.id];
     const nextSavedTeams = isSaved
       ? savedTeams.filter((savedTeam) => savedTeam.id !== team.id)
       : [...savedTeams, team].sort((left, right) => {
@@ -704,8 +832,8 @@ export default function SettingsPage() {
     setTeamSelectionMsg("");
     setTeamSelectionError("");
     setIsTogglingTeamId(team.id);
-    setSavedTeamIds(nextSavedIds);
-    setSavedTeams(nextSavedTeams);
+    queryClient.setQueryData<SavedTeamResponse[]>(["savedTeams"], buildSavedTeamsSnapshot(nextSavedTeams));
+    syncSavedTeamsSnapshot(nextSavedTeams);
 
     try {
       const teamRequestId = team.dbId || team.requestId;
@@ -716,24 +844,25 @@ export default function SettingsPage() {
         await apiClient.post(`${API.USER_TEAMS}/${teamRequestId}`);
         setTeamSelectionMsg(`${team.name} saved.`);
       }
-    } catch (error: any) {
-      setSavedTeamIds(previousSavedIds);
-      setSavedTeams(previousSavedTeams);
-      setTeamSelectionError("Could not update saved teams right now.");
+      await savedTeamsQuery.refetch();
+    } catch (error) {
+      queryClient.setQueryData<SavedTeamResponse[]>(["savedTeams"], buildSavedTeamsSnapshot(previousSavedTeams));
+      syncSavedTeamsSnapshot(previousSavedTeams);
+      setTeamSelectionError(getApiErrorMessage(error, "Could not update saved teams right now."));
     } finally {
       setIsTogglingTeamId(null);
     }
   }
 
-  const initials = initialsFor(firstName, lastName);
   const providerLabel = formatProvider(provider, hasPassword);
   const memberSince = createdAt ? new Date(createdAt).toLocaleDateString() : "Unknown";
   const previewName = buildPreviewName(firstName, lastName);
+  const previewHandle = buildDisplayHandlePreview(displayHandle);
   const focusValue =
-    selectedSports.length === 0 ? "All leagues" : selectedSports.length === 1 ? selectedSports[0] : `${selectedSports.length} leagues`;
-  const activeGroups = activeTeamLeague ? groupsByLeague[activeTeamLeague] || [] : [];
+    selectedSports.length === 0 ? "All feed" : selectedSports.length === 1 ? selectedSports[0] : `${selectedSports.length} leagues`;
+  const activeGroups = activeTeamLeague ? teamGroupsQuery.data?.groups || [] : [];
   const isLeagueFilterMode = activeTeamLeague === null;
-  const isGroupsLoading = activeTeamLeague !== null && groupLoadingLeague === activeTeamLeague;
+  const isGroupsLoading = Boolean(activeTeamLeague) && teamGroupsQuery.isLoading;
   const panelGroups = isLeagueFilterMode
     ? availableLeagues.map((league) => ({ name: league, teams: [], teamIds: [] }))
     : activeGroups;
@@ -794,7 +923,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(31,79,166,0.18),transparent_36%),linear-gradient(180deg,#060b16_0%,#09101d_28%,#060c17_100%)] text-foreground">
+    <div className="min-h-screen bg-page-deep text-foreground">
       <Navbar />
 
       <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pb-20 pt-8 md:px-6 xl:px-8">
@@ -806,20 +935,20 @@ export default function SettingsPage() {
               Tune how you show up in SportSync, keep your sports in sync, and manage the teams that shape your feed.
             </p>
           </div>
-          <div className="rounded-2xl border border-[#24324d] bg-[#08111e]/75 px-4 py-3 text-right shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+                        <div className="surface-panel rounded-2xl px-4 py-3 text-right shadow-[0_18px_50px_var(--overlay-black-soft)]">
             <p className="text-[11px] uppercase tracking-[0.22em] text-muted/70">Member since</p>
             <p className="mt-1 text-sm font-medium text-foreground">{memberSince}</p>
           </div>
         </div>
 
         {loadMsg ? (
-          <div className="rounded-2xl border border-[#29497b] bg-[#0b1630]/85 px-4 py-3 text-sm text-[#bfd4ff]">
+                          <div className="surface-note-info rounded-2xl px-4 py-3 text-sm">
             {loadMsg}
           </div>
         ) : null}
 
         {teamsLoadMsg ? (
-          <div className="rounded-2xl border border-[#60491a] bg-[#1b1305]/85 px-4 py-3 text-sm text-[#f0d9a4]">
+                          <div className="surface-note-warning rounded-2xl px-4 py-3 text-sm">
             {teamsLoadMsg}
           </div>
         ) : null}
@@ -831,22 +960,18 @@ export default function SettingsPage() {
           accent="before:absolute before:inset-y-0 before:left-0 before:w-px before:bg-gradient-to-b before:from-accent/0 before:via-accent/50 before:to-accent/0"
         >
           <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-[30px] border border-[#263553] bg-[linear-gradient(180deg,rgba(10,18,31,0.88),rgba(8,14,24,0.96))] p-7">
+          <div className="rounded-[30px] border border-panel-border-avatar-frame bg-panel p-7">
               <div className="flex flex-col items-center justify-center text-center">
                 <SafeAvatar
                   src={profilePictureUrl}
                   alt="Profile"
-                  className="mb-6 flex h-40 w-40 items-center justify-center overflow-hidden rounded-[36px] border border-[#31476e] bg-[#0b1425] shadow-[0_0_0_8px_rgba(17,28,48,0.5)]"
+              className="mb-6 flex h-40 w-40 items-center justify-center overflow-hidden rounded-full border border-panel-border-avatar bg-panel-fill-elevated shadow-[0_0_0_8px_var(--panel-avatar-ring)]"
                   imgClassName="h-full w-full object-cover"
                   loadingContent={<div className="h-full w-full animate-pulse bg-accent/10" />}
-                  fallback={
-                    <span className="text-4xl font-semibold tracking-[0.18em] text-accent/90">
-                      {initials || "SS"}
-                    </span>
-                  }
+                  fallback={<UserAvatarFallback className="h-16 w-16 text-accent/90" />}
                 />
                 <h2 className="text-4xl font-semibold tracking-tight text-foreground">{previewName}</h2>
-                <p className="mt-2 text-2xl font-medium text-accent">@{displayHandle || "handle"}</p>
+                <p className="mt-2 text-2xl font-medium text-accent">@{previewHandle}</p>
                 <p className="mt-3 text-lg text-muted">{email || "email@example.com"}</p>
               </div>
 
@@ -856,7 +981,7 @@ export default function SettingsPage() {
                 <InfoPill label="Saved Teams" value={`${savedTeamIds.length}`} />
               </div>
 
-              <div className="mt-6 rounded-2xl border border-[#22314a] bg-[#08111c]/70 px-5 py-4 text-sm leading-7 text-muted">
+            <div className="mt-6 rounded-2xl border border-panel-border-soft bg-panel px-5 py-4 text-sm leading-7 text-muted">
                 <p>Your display handle stays unique across the app.</p>
                 <p>Avatar uploads are saved straight to your profile.</p>
                 <p>Deleting the account removes saved teams and feed memory too.</p>
@@ -864,14 +989,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-4">
-              <div className="rounded-3xl border border-[#24314d] bg-[#08111c]/75 p-5">
+              <div className="surface-panel rounded-3xl p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-muted/70">Current sports</p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {selectedSports.length === 0 ? (
-                    <span className="inline-flex items-center rounded-full border border-[#2d4064] bg-[#0c1628] px-3 py-2 text-xs font-semibold text-foreground">
-                      All leagues (default)
-                    </span>
-                  ) : null}
                   {SUPPORTED_SPORTS.map((sport) => {
                     const active = selectedSports.includes(sport.id);
                     return (
@@ -881,8 +1001,8 @@ export default function SettingsPage() {
                         onClick={() => toggleSport(sport.id)}
                         className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition-all ${
                           active
-                            ? "border-accent bg-accent text-white shadow-[0_10px_30px_rgba(46,142,255,0.26)]"
-                            : "border-[#273753] bg-[#0b1320] text-muted hover:border-[#35507e] hover:text-foreground"
+                            ? settingsActivePillCls
+                            : settingsInactivePillCls
                         }`}
                       >
                         {active ? <CheckIcon /> : null}
@@ -894,23 +1014,26 @@ export default function SettingsPage() {
                 <p className="mt-3 text-xs text-muted">
                   {selectedSports.length === 0
                     ? "Nothing is pinned right now. The dashboard will default to All."
-                    : "Tap a league to tune what rises to the top first."}
+                    : "Tap a league to tune what rises to the top first. Changes save automatically."}
                 </p>
+                {isSavingFeedSetup ? <p className="mt-3 text-xs text-muted">Updating dashboard focus...</p> : null}
+                    {!isSavingFeedSetup && feedSetupMsg ? <p className="surface-status-success mt-3 text-xs">{feedSetupMsg}</p> : null}
+                    {feedSetupError ? <p className="surface-status-danger mt-3 text-xs">{feedSetupError}</p> : null}
               </div>
 
-              <div className="rounded-3xl border border-[#24314d] bg-[#08111c]/75 p-5">
+              <div className="surface-panel rounded-3xl p-5">
                 <p className="text-[11px] uppercase tracking-[0.2em] text-muted/70">Saved teams snapshot</p>
-                {savedTeams.length > 0 ? (
+                  {savedTeams.length > 0 ? (
                   <div className="mt-4 flex flex-wrap gap-2">
                     {savedTeams.slice(0, 12).map((team) => (
                       <span
                         key={team.id}
-                        className="inline-flex items-center gap-2 rounded-full border border-[#2d4064] bg-[#0c1628] px-3 py-2 text-xs font-semibold text-foreground"
+                        className="inline-flex items-center gap-2 rounded-full border border-panel-border-info-soft bg-panel-fill-info px-3 py-2 text-xs font-semibold text-foreground"
                       >
                         <SafeAvatar
                           src={team.logo}
                           alt={team.name}
-                          className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-[#101c30]"
+                            className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-full bg-panel-fill-avatar-muted"
                           imgClassName="h-full w-full object-contain"
                           fallback={<span className="text-[10px] text-accent">{team.shortName.slice(0, 2)}</span>}
                         />
@@ -918,15 +1041,15 @@ export default function SettingsPage() {
                       </span>
                     ))}
                     {savedTeams.length > 12 ? (
-                      <span className="inline-flex items-center rounded-full border border-[#273753] bg-[#0b1320] px-3 py-2 text-xs text-muted">
+                          <span className="inline-flex items-center rounded-full border border-panel-border-subtle bg-panel px-3 py-2 text-xs text-muted">
                         +{savedTeams.length - 12} more
                       </span>
                     ) : null}
                   </div>
-                ) : (
-                  <p className="mt-4 text-sm text-muted">No saved teams yet. Pick them below and your feed will reshuffle instantly.</p>
-                )}
-              </div>
+                  ) : (
+                    <p className="mt-4 text-sm text-muted">No saved teams yet. Pick them below and your feed will reshuffle instantly.</p>
+                  )}
+                </div>
             </div>
           </div>
         </Section>
@@ -938,38 +1061,36 @@ export default function SettingsPage() {
           accent=""
         >
           <form className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]" onSubmit={handleProfileSave}>
-            <div className="rounded-3xl border border-[#24314d] bg-[#09121f]/78 p-5">
+            <div className="surface-panel rounded-3xl p-5">
               <p className="text-[11px] uppercase tracking-[0.22em] text-muted/70">Avatar</p>
               <div className="mt-5 flex flex-col items-center gap-4">
                 <SafeAvatar
                   src={profilePictureUrl}
                   alt="Profile preview"
-                  className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-[28px] border border-[#304667] bg-[#0b1425]"
+                      className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border border-panel-border-avatar-muted bg-panel-fill-elevated"
                   imgClassName="h-full w-full object-cover"
                   loadingContent={<div className="h-full w-full animate-pulse bg-accent/10" />}
-                  fallback={<span className="text-2xl font-semibold text-accent">{initials || "SS"}</span>}
+                  fallback={<UserAvatarFallback className="h-12 w-12 text-accent" />}
                 />
                 <div className="flex flex-wrap justify-center gap-2">
                   <button
                     type="button"
                     onClick={openAvatarPicker}
-                    className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-hover"
+                    disabled={isSavingAvatar || isLoadingProfile}
+                    className="rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Upload image
+                    {isSavingAvatar ? "Saving..." : "Upload image"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setProfilePictureUrl("");
-                      setProfileMsg("Avatar cleared. Save profile to publish it.");
-                      setProfileError("");
-                    }}
-                    className="rounded-full border border-[#314261] bg-[#0a1321] px-4 py-2 text-sm font-semibold text-muted transition hover:text-foreground"
+                    onClick={() => void persistProfilePicture("", "Avatar removed.")}
+                    disabled={isSavingAvatar || isLoadingProfile || !profilePictureUrl}
+                  className="rounded-full border border-panel-border-avatar-soft bg-panel-fill-avatar-soft px-4 py-2 text-sm font-semibold text-muted transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Remove image
                   </button>
                 </div>
-                <p className="text-xs text-muted">PNG or JPG under 2 MB works best.</p>
+                <p className="text-xs text-muted">PNG or JPG under 2 MB works best. Avatar changes save right away.</p>
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onAvatarFileChange} />
               </div>
             </div>
@@ -980,8 +1101,9 @@ export default function SettingsPage() {
                 <input
                   className={inputCls}
                   value={firstName}
-                  onChange={(event) => setFirstName(event.target.value)}
+                  onChange={(event) => setFirstName(sanitizeNameInput(event.target.value))}
                   placeholder={DEFAULT_PROFILE_FIRST_NAME}
+                  autoComplete="given-name"
                   disabled={isLoadingProfile || isSavingProfile}
                 />
               </label>
@@ -990,8 +1112,9 @@ export default function SettingsPage() {
                 <input
                   className={inputCls}
                   value={lastName}
-                  onChange={(event) => setLastName(event.target.value)}
+                  onChange={(event) => setLastName(sanitizeNameInput(event.target.value))}
                   placeholder={DEFAULT_PROFILE_LAST_NAME}
+                  autoComplete="family-name"
                   disabled={isLoadingProfile || isSavingProfile}
                 />
               </label>
@@ -1000,8 +1123,9 @@ export default function SettingsPage() {
                 <input
                   className={inputCls}
                   value={displayHandle}
-                  onChange={(event) => setDisplayHandle(event.target.value.replace(/\s+/g, ""))}
+                  onChange={(event) => setDisplayHandle(sanitizeDisplayHandleInput(event.target.value))}
                   placeholder="johndoe"
+                  autoComplete="nickname"
                   disabled={isLoadingProfile || isSavingProfile}
                 />
               </label>
@@ -1033,8 +1157,8 @@ export default function SettingsPage() {
                 >
                   {isSavingProfile ? "Saving..." : "Save profile"}
                 </button>
-                {profileMsg ? <p className="text-sm text-emerald-300">{profileMsg}</p> : null}
-                {profileError ? <p className="text-sm text-rose-300">{profileError}</p> : null}
+                {profileMsg ? <p className="surface-status-success text-sm">{profileMsg}</p> : null}
+                {profileError ? <p className="surface-status-danger text-sm">{profileError}</p> : null}
               </div>
             </div>
           </form>
@@ -1051,14 +1175,14 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowFeedDNA((current) => !current)}
-                className="rounded-full border border-[#304667] bg-[#09121f]/78 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted transition hover:border-[#3b5f95] hover:text-foreground"
+                    className="rounded-full border border-panel-border-avatar-muted bg-panel-fill-avatar-tonal px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted transition hover:border-panel-border-strong hover:text-foreground"
               >
                 {showFeedDNA ? "Hide setup" : "Show setup"}
               </button>
             </div>
             {showFeedDNA ? (
               <>
-            <div className="rounded-3xl border border-[#24314d] bg-[#09121f]/78 p-5">
+            <div className={settingsPanelCls}>
               <div className="flex flex-wrap items-center gap-3">
                 <p className="text-sm font-medium text-foreground">Choose the sports that shape your dashboard.</p>
                 <p className="text-xs text-muted">Leave them all off if you want the dashboard to stay on All.</p>
@@ -1073,8 +1197,8 @@ export default function SettingsPage() {
                       onClick={() => toggleSport(sport.id)}
                       className={`inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-semibold transition-all ${
                         active
-                          ? "border-accent bg-accent text-white shadow-[0_12px_30px_rgba(46,142,255,0.22)]"
-                          : "border-[#273753] bg-[#0b1320] text-muted hover:border-[#35507e] hover:text-foreground"
+                          ? settingsActivePillCls
+                          : settingsInactivePillCls
                       }`}
                     >
                       {active ? <CheckIcon /> : null}
@@ -1083,28 +1207,21 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => void handleFeedSetupSave()}
-                  disabled={isSavingFeedSetup}
-                  className="rounded-full bg-accent px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSavingFeedSetup ? "Saving..." : "Save dashboard setup"}
-                </button>
-                {feedSetupMsg ? <p className="text-sm text-emerald-300">{feedSetupMsg}</p> : null}
-                {feedSetupError ? <p className="text-sm text-rose-300">{feedSetupError}</p> : null}
+              <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                {isSavingFeedSetup ? <p className="text-muted">Saving dashboard focus automatically...</p> : null}
+                    {!isSavingFeedSetup && feedSetupMsg ? <p className="surface-status-success">{feedSetupMsg}</p> : null}
+                    {feedSetupError ? <p className="surface-status-danger">{feedSetupError}</p> : null}
               </div>
             </div>
 
-            <div className="rounded-3xl border border-[#24314d] bg-[#09121f]/78 p-5">
+            <div className={settingsPanelCls}>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">Pick your teams again whenever you want.</p>
                   <p className="mt-1 text-xs text-muted">Saved teams jump to the front of the feed, just like onboarding promised.</p>
                 </div>
-                {teamSelectionMsg ? <p className="text-sm text-emerald-300">{teamSelectionMsg}</p> : null}
-                {teamSelectionError ? <p className="text-sm text-rose-300">{teamSelectionError}</p> : null}
+              {teamSelectionMsg ? <p className="surface-status-success text-sm">{teamSelectionMsg}</p> : null}
+              {teamSelectionError ? <p className="surface-status-danger text-sm">{teamSelectionError}</p> : null}
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -1117,7 +1234,7 @@ export default function SettingsPage() {
                   className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                     activeTeamLeague === null
                       ? "border-accent bg-accent text-white"
-                      : "border-[#273753] bg-[#0b1320] text-muted hover:border-[#35507e] hover:text-foreground"
+                      : settingsInactivePillCls
                   }`}
                 >
                   All
@@ -1133,7 +1250,7 @@ export default function SettingsPage() {
                     className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                       activeTeamLeague === league
                         ? "border-accent bg-accent text-white"
-                        : "border-[#273753] bg-[#0b1320] text-muted hover:border-[#35507e] hover:text-foreground"
+                        : settingsInactivePillCls
                     }`}
                   >
                     {league}
@@ -1152,6 +1269,7 @@ export default function SettingsPage() {
                       value={teamSearchQuery}
                       onChange={(event) => setTeamSearchQuery(event.target.value)}
                       placeholder="Search teams..."
+                      autoComplete="off"
                       disabled={isLoadingTeams}
                     />
                   </label>
@@ -1161,7 +1279,7 @@ export default function SettingsPage() {
                       Array.from({ length: 6 }).map((_, index) => (
                         <div
                           key={index}
-                          className="h-32 animate-pulse rounded-[24px] border border-[#22314a] bg-[#0b1423]/75"
+                    className="h-32 animate-pulse rounded-[24px] border border-panel-border-soft bg-panel-fill-subtle"
                         />
                       ))
                     ) : visibleTeams.length > 0 ? (
@@ -1176,15 +1294,15 @@ export default function SettingsPage() {
                             onClick={() => void handleTeamToggle(team)}
                             className={`group rounded-[24px] border p-4 text-left transition-all ${
                               isSaved
-                                ? "border-accent bg-[linear-gradient(180deg,rgba(46,142,255,0.18),rgba(10,18,31,0.92))] shadow-[0_16px_40px_rgba(21,77,169,0.18)]"
-                                : "border-[#22314a] bg-[#0b1423]/78 hover:border-[#35507e] hover:bg-[#0d1829]"
+                                ? settingsTeamCardActiveCls
+                                : settingsTeamCardInactiveCls
                             } ${isBusy ? "cursor-wait opacity-80" : ""}`}
                           >
                             <div className="flex items-start justify-between gap-3">
                               <SafeAvatar
                                 src={team.logo}
                                 alt={team.name}
-                                className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[18px] border border-[#283a5b] bg-[#0a1322]"
+                      className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[18px] border border-panel-border-avatar-subtle bg-panel-fill-avatar-soft"
                                 imgClassName="h-full w-full object-contain p-2"
                                 loadingContent={<div className="h-full w-full animate-pulse bg-accent/10" />}
                                 fallback={<span className="text-sm font-semibold text-accent">{team.shortName.slice(0, 2)}</span>}
@@ -1203,7 +1321,7 @@ export default function SettingsPage() {
                         );
                       })
                     ) : (
-                      <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-[#22314a] bg-[#08111c]/72 px-4 py-6 text-sm text-muted">
+                <div className="md:col-span-2 xl:col-span-3 rounded-2xl border border-panel-border-soft bg-panel px-4 py-6 text-sm text-muted">
                         No teams match this view yet. Try a different search or league.
                       </div>
                     )}
@@ -1216,7 +1334,7 @@ export default function SettingsPage() {
                   selectedGroups={selectedGroupNames}
                   emptyStateText={filterEmptyStateText}
                   isLoading={isGroupsLoading}
-                  layout={isLeagueFilterMode ? "stack" : "grid"}
+                  layout="grid"
                   onClearAll={handleFilterClearAll}
                   onToggleGroup={handleFilterToggle}
                 />
@@ -1224,7 +1342,7 @@ export default function SettingsPage() {
             </div>
               </>
             ) : (
-              <div className="rounded-3xl border border-[#24314d] bg-[#09121f]/78 p-5 text-sm text-muted">
+              <div className={`${settingsPanelCls} text-sm text-muted`}>
                 Feed setup is tucked away for now. Show it again anytime if you want to change sports or saved teams.
               </div>
             )}
@@ -1245,15 +1363,27 @@ export default function SettingsPage() {
             </div>
 
             <form className="grid gap-4 md:grid-cols-2" onSubmit={handlePasswordSave}>
+              <input
+                type="text"
+                name="username"
+                value={email || displayHandle}
+                autoComplete="username"
+                readOnly
+                tabIndex={-1}
+                aria-hidden="true"
+                className="sr-only"
+              />
               {hasPassword ? (
                 <label className="block md:col-span-2">
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted/70">Current password</span>
                   <input
                     type="password"
+                    name="currentPassword"
                     className={inputCls}
                     value={currentPassword}
                     onChange={(event) => setCurrentPassword(event.target.value)}
                     placeholder="Current password"
+                    autoComplete="current-password"
                     disabled={isSavingPassword}
                   />
                 </label>
@@ -1262,10 +1392,12 @@ export default function SettingsPage() {
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted/70">New password</span>
                 <input
                   type="password"
+                  name="newPassword"
                   className={inputCls}
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
                   placeholder="At least 8 characters"
+                  autoComplete="new-password"
                   disabled={isSavingPassword}
                 />
               </label>
@@ -1273,10 +1405,12 @@ export default function SettingsPage() {
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted/70">Confirm password</span>
                 <input
                   type="password"
+                  name="confirmPassword"
                   className={inputCls}
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
                   placeholder="Repeat the new password"
+                  autoComplete="new-password"
                   disabled={isSavingPassword}
                 />
               </label>
@@ -1289,8 +1423,8 @@ export default function SettingsPage() {
                 >
                   {isSavingPassword ? "Saving..." : hasPassword ? "Change password" : "Create password"}
                 </button>
-                {passwordMsg ? <p className="text-sm text-emerald-300">{passwordMsg}</p> : null}
-                {passwordError ? <p className="text-sm text-rose-300">{passwordError}</p> : null}
+                  {passwordMsg ? <p className="surface-status-success text-sm">{passwordMsg}</p> : null}
+                  {passwordError ? <p className="surface-status-danger text-sm">{passwordError}</p> : null}
               </div>
             </form>
           </div>
@@ -1300,9 +1434,9 @@ export default function SettingsPage() {
           eyebrow="Danger"
           title="Delete account"
           description="This permanently removes your profile, saved teams, and feed memory. There is no undo."
-          accent="border-rose-500/25"
+          accent="border-[color:var(--danger-border)]"
         >
-          <div className="rounded-3xl border border-rose-500/20 bg-[linear-gradient(180deg,rgba(47,12,17,0.62),rgba(17,8,11,0.92))] p-5">
+                    <div className="surface-danger-card rounded-3xl p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="max-w-2xl">
                 <p className="text-base font-semibold text-foreground">Permanently delete this account</p>
@@ -1313,21 +1447,32 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={() => setShowDelete((current) => !current)}
-                className="rounded-full border border-rose-400/35 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/20"
+                          className="surface-danger-button rounded-full px-4 py-2 text-sm font-semibold transition"
               >
                 {showDelete ? "Close" : "Open delete controls"}
               </button>
             </div>
 
             {showDelete ? (
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <form
+                className="mt-5 grid gap-4 md:grid-cols-2"
+                autoComplete="off"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleDeleteAccount();
+                }}
+              >
                 <label className="block">
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted/70">Type DELETE</span>
                   <input
+                    name="deleteAccountConfirmText"
                     className={inputCls}
                     value={deleteConfirmText}
                     onChange={(event) => setDeleteConfirmText(event.target.value)}
                     placeholder="DELETE"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     disabled={isDeletingAccount}
                   />
                 </label>
@@ -1336,31 +1481,32 @@ export default function SettingsPage() {
                     <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted/70">Current password</span>
                     <input
                       type="password"
+                      name="deleteAccountPassword"
                       className={inputCls}
                       value={deletePassword}
                       onChange={(event) => setDeletePassword(event.target.value)}
                       placeholder="Current password"
+                      autoComplete="new-password"
                       disabled={isDeletingAccount}
                     />
                   </label>
                 ) : (
-                  <div className="rounded-2xl border border-[#2b3854] bg-[#09111c]/75 px-4 py-3 text-sm text-muted">
+                    <div className="rounded-2xl border border-panel-border-avatar-subtle bg-panel px-4 py-3 text-sm text-muted">
                     Google-only account detected. Password confirmation is not required unless you add one later.
                   </div>
                 )}
 
                 <div className="md:col-span-2 flex flex-wrap items-center gap-3 pt-2">
                   <button
-                    type="button"
-                    onClick={() => void handleDeleteAccount()}
+                    type="submit"
                     disabled={isDeletingAccount}
-                    className="rounded-full bg-rose-500 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="surface-danger-solid rounded-full px-5 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isDeletingAccount ? "Deleting..." : "Delete account forever"}
                   </button>
-                  {deleteError ? <p className="text-sm text-rose-200">{deleteError}</p> : null}
+                    {deleteError ? <p className="surface-status-danger-soft text-sm">{deleteError}</p> : null}
                 </div>
-              </div>
+              </form>
             ) : null}
           </div>
         </Section>

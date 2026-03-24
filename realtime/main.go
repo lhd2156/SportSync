@@ -14,8 +14,8 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"sportsync-realtime/handlers"
-	redisclient "sportsync-realtime/redis"
+	"sportsync/realtime/handlers"
+	redisclient "sportsync/realtime/redis"
 )
 
 func main() {

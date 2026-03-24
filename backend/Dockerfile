@@ -12,10 +12,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Switch to non-root user before running
 USER sportsync
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["/app/docker-entrypoint.sh"]

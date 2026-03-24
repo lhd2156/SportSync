@@ -4,8 +4,9 @@
  * Fetches real league logos from TheSportsDB API.
  * Selection is optional — user can skip.
  */
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import apiClient from "../api/client";
 import { API, ROUTES } from "../constants";
 
@@ -18,67 +19,58 @@ const LEAGUE_IDS: { key: string; dbId: number; fallbackLabel: string; sport: str
   { key: "EPL", dbId: 4328, fallbackLabel: "Premier League", sport: "Soccer" },
 ];
 
-interface LeagueData {
+type LeagueData = {
   id: string;
   label: string;
   sport: string;
   logo: string;
-}
+};
+
+type SportsDbLeagueResponse = {
+  leagues?: Array<{
+    strLeague?: string;
+    strBadge?: string;
+  }>;
+};
 
 export default function OnboardingStep2() {
   const navigate = useNavigate();
-  const [leagues, setLeagues] = useState<LeagueData[]>([]);
   const [selectedSports, setSelectedSports] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fetch league data from TheSportsDB
-  useEffect(() => {
-    async function fetchLeagues() {
-      const results: LeagueData[] = [];
-
-      const fetches = LEAGUE_IDS.map(async (league) => {
-        try {
-          const resp = await fetch(
-            `https://www.thesportsdb.com/api/v1/json/3/lookupleague.php?id=${league.dbId}`
-          );
-          const data = await resp.json();
-          if (data.leagues && data.leagues[0]) {
-            const l = data.leagues[0];
-            results.push({
-              id: league.key,
-              label: l.strLeague || league.fallbackLabel,
-              sport: league.sport,
-              logo: l.strBadge ? `${l.strBadge}/small` : "",
+  const { data: leagues = [], isLoading } = useQuery<LeagueData[]>({
+    queryKey: ["onboarding-leagues"],
+    queryFn: async () => {
+      const results = await Promise.all(
+        LEAGUE_IDS.map(async (league): Promise<LeagueData> => {
+          try {
+            const response = await apiClient.get<SportsDbLeagueResponse>(API.SPORTS_LEAGUE, {
+              params: { league_id: league.dbId },
             });
-          } else {
-            results.push({
+            const resolvedLeague = response.data?.leagues?.[0];
+            return {
+              id: league.key,
+              label: resolvedLeague?.strLeague || league.fallbackLabel,
+              sport: league.sport,
+              logo: resolvedLeague?.strBadge ? `${resolvedLeague.strBadge}/small` : "",
+            };
+          } catch {
+            return {
               id: league.key,
               label: league.fallbackLabel,
               sport: league.sport,
               logo: "",
-            });
+            };
           }
-        } catch {
-          results.push({
-            id: league.key,
-            label: league.fallbackLabel,
-            sport: league.sport,
-            logo: "",
-          });
-        }
-      });
+        }),
+      );
 
-      await Promise.all(fetches);
-      // Sort to maintain consistent order
-      const order = LEAGUE_IDS.map((l) => l.key);
-      results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-      setLeagues(results);
-      setIsLoading(false);
-    }
-
-    fetchLeagues();
-  }, []);
+      const order = LEAGUE_IDS.map((league) => league.key);
+      return results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+    },
+    staleTime: 1000 * 60 * 10,
+    refetchOnWindowFocus: false,
+  });
 
   function toggleSport(sportId: string) {
     setSelectedSports((prev) =>

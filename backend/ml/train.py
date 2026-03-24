@@ -1,8 +1,9 @@
 """
-SportSync - Gradient Boosted Trees training script.
+SportSync - Random Forest training script.
 
 Run manually before deploy and whenever retraining is needed.
-Trains one GBT model per league with cross-validated hyperparameters.
+Trains one calibrated Random Forest model per league using a temporal
+holdout split so the reported metrics reflect future games, not shuffled data.
 """
 from __future__ import annotations
 
@@ -15,11 +16,10 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import train_test_split
-from sqlalchemy import text
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, roc_auc_score
+from sqlalchemy import select
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -27,48 +27,96 @@ if str(BACKEND_DIR) not in sys.path:
 
 from database import engine
 from ml.pipeline import FEATURE_COLUMNS, build_training_dataset
+from models.game import Game
 
 MODEL_PATH = Path(__file__).resolve().parent / "model.pkl"
-MIN_SAMPLES_PER_LEAGUE = 25
+MIN_SAMPLES_PER_LEAGUE = 40
+TEMPORAL_TEST_FRACTION = 0.2
 
 
 def load_historical_games() -> pd.DataFrame:
     """Pull historical games from the database into a DataFrame."""
-    query = text(
-        """
-        SELECT
-            g.id,
-            g.home_team_id,
-            g.away_team_id,
-            g.sport,
-            g.league,
-            g.scheduled_at,
-            g.status,
-            g.home_score,
-            g.away_score
-        FROM games g
-        WHERE g.home_team_id IS NOT NULL
-          AND g.away_team_id IS NOT NULL
-          AND g.scheduled_at IS NOT NULL
-        ORDER BY g.scheduled_at ASC, g.id ASC
-        """
+    query = select(
+        Game.id,
+        Game.home_team_id,
+        Game.away_team_id,
+        Game.sport,
+        Game.league,
+        Game.scheduled_at,
+        Game.status,
+        Game.home_score,
+        Game.away_score,
+    ).where(
+        Game.home_team_id.is_not(None),
+        Game.away_team_id.is_not(None),
+        Game.scheduled_at.is_not(None),
+    ).order_by(
+        Game.scheduled_at.asc(),
+        Game.id.asc(),
     )
-    return pd.read_sql_query(query, engine)
+    return pd.read_sql(query, engine)
+
+
+def _temporal_train_test_split(league_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    ordered = league_df.sort_values(["scheduled_at", "game_id"]).reset_index(drop=True)
+    if len(ordered) < 2:
+        return ordered.iloc[:0].copy(), ordered.copy()
+
+    split_idx = int(round(len(ordered) * (1.0 - TEMPORAL_TEST_FRACTION)))
+    split_idx = max(1, min(len(ordered) - 1, split_idx))
+    train_df = ordered.iloc[:split_idx].copy()
+    test_df = ordered.iloc[split_idx:].copy()
+    return train_df, test_df
+
+
+def _calibration_splits(train_df: pd.DataFrame) -> int:
+    if len(train_df) >= 300:
+        return 4
+    if len(train_df) >= 120:
+        return 3
+    return 2
+
+
+def _mean_feature_importance(model: CalibratedClassifierCV) -> list[dict[str, float]]:
+    importance_vectors: list[np.ndarray] = []
+    for calibrated in getattr(model, "calibrated_classifiers_", []):
+        estimator = getattr(calibrated, "estimator", None)
+        if estimator is not None and hasattr(estimator, "feature_importances_"):
+            importance_vectors.append(np.asarray(estimator.feature_importances_, dtype=float))
+
+    if not importance_vectors:
+        return []
+
+    averaged = np.mean(np.vstack(importance_vectors), axis=0)
+    ranked = sorted(zip(FEATURE_COLUMNS, averaged), key=lambda item: item[1], reverse=True)
+    return [
+        {"feature": feature, "importance": round(float(importance), 4)}
+        for feature, importance in ranked[:15]
+    ]
 
 
 def train_models() -> dict[str, Any]:
     """
-    Train a Gradient Boosted Trees classifier bundle, one model per league.
-    Reports accuracy, log loss, and Brier score for calibration.
+    Train one calibrated Random Forest per league.
+
+    The evaluation is time-aware: models train on earlier games and are scored on
+    later games, which better matches the real prediction problem.
     """
     historical_games = load_historical_games()
     training_df = build_training_dataset(historical_games)
     if training_df.empty:
         raise RuntimeError("No completed historical games were found in the database.")
 
+    if "scheduled_at" not in training_df.columns:
+        raise RuntimeError("Training dataset is missing scheduled_at; retraining cannot continue.")
+
+    training_df["scheduled_at"] = pd.to_datetime(training_df["scheduled_at"], errors="coerce", utc=True)
+    training_df = training_df.dropna(subset=["scheduled_at"]).copy()
+
     model_bundle: dict[str, Any] = {
-        "model_version": datetime.now(timezone.utc).strftime("gbt_%Y%m%d_%H%M%S"),
+        "model_version": datetime.now(timezone.utc).strftime("rfcal_%Y%m%d_%H%M%S"),
         "trained_at": datetime.now(timezone.utc).isoformat(),
+        "model_type": "RandomForestClassifier+CalibratedClassifierCV",
         "feature_columns": FEATURE_COLUMNS,
         "models": {},
         "metrics": {},
@@ -76,33 +124,37 @@ def train_models() -> dict[str, Any]:
     }
 
     for league, league_df in training_df.groupby("league"):
-        league_df = league_df.dropna(subset=FEATURE_COLUMNS + ["label"]).copy()
+        league_df = league_df.dropna(subset=FEATURE_COLUMNS + ["label", "scheduled_at"]).copy()
         if len(league_df) < MIN_SAMPLES_PER_LEAGUE:
             continue
         if league_df["label"].nunique() < 2:
             continue
 
-        X = league_df[FEATURE_COLUMNS].astype(float).values
-        y = league_df["label"].astype(int).values
+        train_df, test_df = _temporal_train_test_split(league_df)
+        if train_df.empty or test_df.empty:
+            continue
+        if train_df["label"].nunique() < 2:
+            continue
 
-        stratify = y if len(pd.Series(y).value_counts()) > 1 else None
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=0.2,
-            random_state=42,
-            stratify=stratify,
-        )
+        X_train = train_df[FEATURE_COLUMNS].astype(float).values
+        y_train = train_df["label"].astype(int).values
+        X_test = test_df[FEATURE_COLUMNS].astype(float).values
+        y_test = test_df["label"].astype(int).values
 
-        # Gradient Boosted Trees — tuned to avoid overfitting on small datasets
-        model = GradientBoostingClassifier(
-            n_estimators=200,
-            max_depth=4,
-            learning_rate=0.08,
-            min_samples_leaf=8,
-            min_samples_split=12,
-            subsample=0.85,
+        base_model = RandomForestClassifier(
+            n_estimators=500,
+            max_depth=10,
+            min_samples_leaf=4,
+            min_samples_split=10,
             max_features="sqrt",
+            class_weight="balanced_subsample",
+            n_jobs=1,
             random_state=42,
+        )
+        model = CalibratedClassifierCV(
+            estimator=base_model,
+            method="sigmoid",
+            cv=_calibration_splits(train_df),
         )
         model.fit(X_train, y_train)
 
@@ -110,36 +162,23 @@ def train_models() -> dict[str, Any]:
         y_prob = model.predict_proba(X_test)
         y_prob_positive = y_prob[:, 1] if y_prob.shape[1] > 1 else y_prob[:, 0]
 
-        # 5-fold cross-validation for reliable metrics
-        cv_folds = min(5, max(2, len(league_df) // 20))
-        cv_scores = cross_val_score(model, X, y, cv=cv_folds, scoring="accuracy")
-
         metrics = {
             "samples": int(len(league_df)),
-            "train_samples": int(len(X_train)),
-            "test_samples": int(len(X_test)),
+            "train_samples": int(len(train_df)),
+            "test_samples": int(len(test_df)),
             "accuracy": round(float(accuracy_score(y_test, y_pred)), 4),
-            "log_loss": round(float(log_loss(y_test, y_prob)), 4),
+            "log_loss": round(float(log_loss(y_test, y_prob, labels=[0, 1])), 4),
             "brier_score": round(float(brier_score_loss(y_test, y_prob_positive)), 4),
-            "cv_accuracy_mean": round(float(cv_scores.mean()), 4),
-            "cv_accuracy_std": round(float(cv_scores.std()), 4),
+            "auc": round(float(roc_auc_score(y_test, y_prob_positive)), 4) if len(np.unique(y_test)) > 1 else None,
+            "train_start": pd.Timestamp(train_df["scheduled_at"].min()).isoformat(),
+            "train_end": pd.Timestamp(train_df["scheduled_at"].max()).isoformat(),
+            "test_start": pd.Timestamp(test_df["scheduled_at"].min()).isoformat(),
+            "test_end": pd.Timestamp(test_df["scheduled_at"].max()).isoformat(),
         }
-
-        # Feature importance ranking
-        importances = model.feature_importances_
-        importance_pairs = sorted(
-            zip(FEATURE_COLUMNS, importances),
-            key=lambda x: x[1],
-            reverse=True,
-        )
-        top_features = [
-            {"feature": name, "importance": round(float(imp), 4)}
-            for name, imp in importance_pairs[:15]
-        ]
 
         model_bundle["models"][league] = model
         model_bundle["metrics"][league] = metrics
-        model_bundle["feature_importance"][league] = top_features
+        model_bundle["feature_importance"][league] = _mean_feature_importance(model)
 
     if not model_bundle["models"]:
         raise RuntimeError(

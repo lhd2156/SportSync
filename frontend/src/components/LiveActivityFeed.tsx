@@ -8,7 +8,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { API } from "../constants";
 
-interface FeedItem {
+type FeedItem = {
   id: string;
   gameId: string;
   text: string;
@@ -34,10 +34,18 @@ interface FeedItem {
   status: string;
   gameMatchup?: string;
   isSavedTeam?: boolean;
-}
+};
 
-interface LiveActivityFeedProps {
+type SavedTeamSummary = {
+  name: string;
+  shortName?: string;
+  league?: string;
+  sport?: string;
+};
+
+type LiveActivityFeedProps = {
   items: FeedItem[];
+  allItems?: FeedItem[];
   activityDate?: string;         // "" or undefined = today, "20260315" = specific date
   onDateChange?: (date: string) => void;
   hasMore?: boolean;
@@ -47,16 +55,17 @@ interface LiveActivityFeedProps {
   error?: string;
   activeLeague?: string;         // controlled league filter from parent
   onLeagueChange?: (league: string) => void;  // notify parent of league change
-}
+  savedTeams?: SavedTeamSummary[];
+};
 
-interface DisplayFeedItem extends FeedItem {
+type DisplayFeedItem = FeedItem & {
   displayText: string;
-}
+};
 
-interface PitchMatchup {
+type PitchMatchup = {
   batterName: string;
   pitcherName: string;
-}
+};
 
 const LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -86,6 +95,42 @@ function formatDateLabel(yyyymmdd: string): string {
   });
 }
 
+function normalizeTeamMatchValue(value: string): string {
+  return (value || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+}
+
+function normalizeSavedTeamLeague(value?: string): string {
+  const normalized = (value || "").trim().toUpperCase();
+  if (normalized === "ENGLISH PREMIER LEAGUE") return "EPL";
+  return normalized;
+}
+
+function matchesSavedTeamSide(
+  gameTeam: { name: string; shortName?: string },
+  gameLeague: string,
+  savedTeam: SavedTeamSummary,
+): boolean {
+  const savedLeague = normalizeSavedTeamLeague(savedTeam.league || savedTeam.sport);
+  const normalizedGameLeague = normalizeSavedTeamLeague(gameLeague);
+  if (savedLeague && normalizedGameLeague && savedLeague !== normalizedGameLeague) {
+    return false;
+  }
+
+  const gameFull = normalizeTeamMatchValue(gameTeam.name);
+  const gameShort = normalizeTeamMatchValue(gameTeam.shortName || "");
+  const savedFull = normalizeTeamMatchValue(savedTeam.name);
+  const savedShort = normalizeTeamMatchValue(savedTeam.shortName || "");
+
+  if (!savedFull && !savedShort) {
+    return false;
+  }
+
+  return (
+    (!!savedFull && (gameFull === savedFull || gameShort === savedFull || gameFull.endsWith(savedFull))) ||
+    (!!savedShort && (gameFull === savedShort || gameShort === savedShort || gameFull.endsWith(savedShort) || gameShort.endsWith(savedShort)))
+  );
+}
+
 function formatDateInputValue(yyyymmdd?: string): string {
   const normalized = cleanValue(yyyymmdd);
   if (!normalized || normalized.length !== 8) return "";
@@ -107,6 +152,8 @@ function getTodayActivityDate(): string {
   const day = String(today.getDate()).padStart(2, "0");
   return `${year}${month}${day}`;
 }
+
+void getTodayActivityDate;
 
 /** Strip season stat totals like (10), (12) from play text */
 function stripSeasonNumbers(text: string): string {
@@ -269,6 +316,9 @@ function sanitizeSafeDisplayStatLine(value?: string | null): string {
 function normalizeText(text: string): string {
   return normalizeDisplayEncoding(text).replace(/\s+/g, " ").trim();
 }
+
+void sanitizeStatLine;
+void sanitizeSafeDisplayStatLine;
 
 function sanitizeRenderedStatLine(value?: string | null): string {
   const cleaned = cleanValue(value);
@@ -577,6 +627,8 @@ function isPitchCountRow(text: string): boolean {
   return /^pitch\s+\d+\s*:/i.test(normalizeText(text));
 }
 
+void formatDisplayActivityMeta;
+
 function formatRenderedActivityMeta(item: FeedItem): string {
   const detail = cleanValue(item.statusDetail);
   const base = item.status === "final"
@@ -652,6 +704,7 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   if (cleanName) params.set("name", cleanName);
   if (cleanLeague) params.set("league", cleanLeague);
   if (cleanTeamName) params.set("team", cleanTeamName);
+  params.set("placeholder", "false");
   const proxyUrl = params.toString()
     ? `${API_BASE_URL}${API.ESPN_HEADSHOT}?${params.toString()}`
     : "";
@@ -659,6 +712,7 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   if (cleanName) fallbackParams.set("name", cleanName);
   if (cleanLeague) fallbackParams.set("league", cleanLeague);
   if (cleanTeamName) fallbackParams.set("team", cleanTeamName);
+  fallbackParams.set("placeholder", "false");
   const proxyFallbackUrl = fallbackParams.toString()
     ? `${API_BASE_URL}${API.ESPN_HEADSHOT}?${fallbackParams.toString()}`
     : "";
@@ -672,34 +726,24 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   }
 
   if (isPremierLeagueHeadshot) {
-    add(cleanSrc);
-    add(proxyFallbackUrl);
     add(proxyUrl);
+    add(proxyFallbackUrl);
+    add(cleanSrc);
     return sources;
   }
 
   if (cleanLeagueKey === "MLB") {
-    // Prefer the clean official MLB mugshot when we already have it.
-    // Fall back to the backend resolver only when the upstream row is blank/bad.
-    if (prefersDirectOfficialHeadshot) {
-      add(cleanSrc);
-    }
-    add(proxyFallbackUrl);
     add(proxyUrl);
-    if (cleanSrc && !prefersDirectOfficialHeadshot) {
-      add(cleanSrc);
-    }
+    add(proxyFallbackUrl);
+    add(cleanSrc);
     return sources;
   }
 
+  add(proxyUrl);
+  add(proxyFallbackUrl);
   if (prefersDirectOfficialHeadshot) {
     add(cleanSrc);
   }
-
-  // Official mugshots render faster directly in-browser. Keep the backend
-  // proxy as the fallback so we still recover missing/bad upstream images.
-  add(proxyUrl);
-  add(proxyFallbackUrl);
 
   if (isOfficialHeadshotUrl(cleanSrc) && !prefersDirectOfficialHeadshot) {
     add(cleanSrc);
@@ -805,9 +849,9 @@ const HeadshotImg = memo(function HeadshotImg({
   if (!resolvedSrc) {
     if (!isReady) {
       return (
-        <div className={`${className} relative overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(33,46,74,0.9),_rgba(16,21,34,0.98)_72%)] border border-[#2a3654] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}>
-          <div className="absolute inset-[3px] rounded-full border border-[#334469]/40" />
-          <div className="absolute inset-0 animate-pulse bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_55%)]" />
+        <div className={`${className} surface-avatar-loading`}>
+          <div className="surface-avatar-inner" />
+          <div className="surface-avatar-gloss animate-pulse" />
           <div className="relative opacity-45">
             <PersonSVG size={18} />
           </div>
@@ -817,11 +861,11 @@ const HeadshotImg = memo(function HeadshotImg({
 
     const initials = getInitials(alt);
     return (
-      <div className={`${className} relative overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(39,52,81,0.92),_rgba(18,24,39,0.98)_72%)] border border-[#2a3654] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]`}>
+      <div className={`${className} surface-avatar-ready`}>
         {initials ? (
           <>
-            <div className="absolute inset-[3px] rounded-full border border-[#334469]/45" />
-            <span className="relative text-[12px] font-semibold tracking-[0.08em] text-[#9eb1da]">{initials}</span>
+            <div className="surface-avatar-inner" />
+            <span className="surface-avatar-initials text-[12px] font-semibold tracking-[0.08em]">{initials}</span>
           </>
         ) : fallbackSrc ? (
           <img src={fallbackSrc} alt="" className="h-full w-full object-contain p-1" loading="lazy" />
@@ -832,7 +876,7 @@ const HeadshotImg = memo(function HeadshotImg({
     );
   }
   return (
-    <div className={`${className} relative overflow-hidden bg-[#1b1f2a] border border-[#25304a] flex items-center justify-center`}>
+    <div className={`${className} surface-avatar-image`}>
       <img
         src={resolvedSrc}
         alt={alt}
@@ -873,13 +917,17 @@ function isPeriodEnd(text: string, playType: string): boolean {
   );
 }
 
-function isTeamVsTeamEvent(item: Pick<FeedItem, "league" | "text" | "playType" | "athleteName" | "athlete2Name">): boolean {
+function isTeamVsTeamEvent(item: Pick<FeedItem, "league" | "text" | "playType" | "athleteName" | "athlete2Name" | "status">): boolean {
   if (isPeriodEnd(item.text, item.playType)) return true;
+
+  const normalizedType = cleanValue(item.playType).toLowerCase();
+  if (normalizedType.includes("scheduled game") || (item.status === "upcoming" && !cleanValue(item.athleteName) && !cleanValue(item.athlete2Name))) {
+    return true;
+  }
 
   if (item.league !== "NHL") return false;
 
   const normalizedText = normalizeText(item.text).toLowerCase();
-  const normalizedType = cleanValue(item.playType).toLowerCase();
   const hasAthletes = !!cleanValue(item.athleteName) || !!cleanValue(item.athlete2Name);
 
   if (hasAthletes) return false;
@@ -898,6 +946,9 @@ function isTeamVsTeamEvent(item: Pick<FeedItem, "league" | "text" | "playType" |
 function isLowSignalActivity(item: Pick<FeedItem, "text" | "league" | "athleteName" | "athlete2Name">): boolean {
   const normalizedText = item.text.replace(/\s+/g, " ").trim().toLowerCase();
   if (!normalizedText) return true;
+  if (!cleanValue(item.athleteName) && !cleanValue(item.athlete2Name) && normalizedText === "foul") {
+    return true;
+  }
 
   if (/^.+?\s+pitches?\s+to\s+.+$/.test(normalizedText)) return true;
   if (/\bin\s+(left|center|right)\s+field[.!]?$/.test(normalizedText)) return true;
@@ -922,6 +973,7 @@ function isLowSignalActivity(item: Pick<FeedItem, "text" | "league" | "athleteNa
 
   return false;
 }
+
 
 function secondarySharesPrimaryTeam(league: string, text: string, playType: string): boolean {
   const normalizedText = normalizeText(text).toLowerCase();
@@ -957,6 +1009,7 @@ const PlayRow = memo(function PlayRow({
     playType: item.playType,
     athleteName: item.athleteName,
     athlete2Name: item.athlete2Name,
+    status: item.status,
   });
   const parsedAthletes = parsePlayAthletes(displayText);
   const leadAthleteFromText = extractLeadAthlete(item.text);
@@ -1027,10 +1080,10 @@ const PlayRow = memo(function PlayRow({
     avatarEl = (
       <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
         <div className="flex items-center -space-x-2">
-          <div className="z-10 flex h-10 w-10 items-center justify-center rounded-full border border-[#25304a] bg-[#1b1f2a] p-1 shadow-[0_0_0_2px_rgba(9,14,28,0.95)]">
+          <div className="surface-avatar-image surface-avatar-ring z-10 flex h-10 w-10 items-center justify-center rounded-full p-1">
             <img src={normalizedAwayBadge || normalizedPlayTeamLogo} alt="" className="h-full w-full object-contain" />
           </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[#25304a] bg-[#1b1f2a] p-1 shadow-[0_0_0_2px_rgba(9,14,28,0.95)]">
+          <div className="surface-avatar-image surface-avatar-ring flex h-10 w-10 items-center justify-center rounded-full p-1">
             <img src={normalizedHomeBadge || normalizedPlayTeamLogo} alt="" className="h-full w-full object-contain" />
           </div>
         </div>
@@ -1046,7 +1099,7 @@ const PlayRow = memo(function PlayRow({
             fallbackSrc={primaryFallbackLogo}
             league={item.league}
             teamName={primaryTeamName}
-            className="z-10 h-10 w-10 rounded-full shadow-[0_0_0_2px_rgba(9,14,28,0.95)]"
+            className="surface-avatar-ring z-10 h-10 w-10 rounded-full"
           />
           <HeadshotImg
             src={resolvedSecondaryAthleteHeadshot}
@@ -1054,7 +1107,7 @@ const PlayRow = memo(function PlayRow({
             fallbackSrc={secondaryFallbackLogo}
             league={item.league}
             teamName={secondaryTeamName}
-            className="h-10 w-10 rounded-full shadow-[0_0_0_2px_rgba(9,14,28,0.95)]"
+            className="surface-avatar-ring h-10 w-10 rounded-full"
           />
         </div>
       </div>
@@ -1068,14 +1121,14 @@ const PlayRow = memo(function PlayRow({
           fallbackSrc={primaryFallbackLogo}
           league={item.league}
           teamName={primaryTeamName}
-          className="h-11 w-11 rounded-full shadow-[0_0_0_2px_rgba(9,14,28,0.95)]"
+          className="surface-avatar-ring h-11 w-11 rounded-full"
         />
       </div>
     );
   } else if (normalizedPlayTeamLogo) {
     avatarEl = (
       <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[#25304a] bg-[#1b1f2a] p-1 shadow-[0_0_0_2px_rgba(9,14,28,0.95)]">
+        <div className="surface-avatar-image surface-avatar-ring flex h-11 w-11 items-center justify-center rounded-full p-1">
           <img src={normalizedPlayTeamLogo} alt={item.playTeamAbbr} className="h-full w-full object-contain" loading="lazy" />
         </div>
       </div>
@@ -1083,7 +1136,7 @@ const PlayRow = memo(function PlayRow({
   } else {
     avatarEl = (
       <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[#25304a] bg-[#1b1f2a] shadow-[0_0_0_2px_rgba(9,14,28,0.95)]"><PersonSVG size={18} /></div>
+        <div className="surface-avatar-image surface-avatar-ring flex h-11 w-11 items-center justify-center rounded-full"><PersonSVG size={18} /></div>
       </div>
     );
   }
@@ -1140,7 +1193,7 @@ const PlayRow = memo(function PlayRow({
   );
 });
 
-export default function LiveActivityFeed({ items, activityDate, onDateChange, hasMore, onLoadMore, total, loading, error, activeLeague, onLeagueChange }: LiveActivityFeedProps) {
+export default function LiveActivityFeed({ items, allItems, activityDate, onDateChange, hasMore, onLoadMore, total, loading, error, activeLeague, onLeagueChange, savedTeams = [] }: LiveActivityFeedProps) {
   const [teamFilter, setTeamFilter] = useState<"all" | "my-teams">("all");
   // Use controlled league filter if parent provides it, otherwise local state
   const [localLeague, setLocalLeague] = useState<string>("ALL");
@@ -1155,6 +1208,12 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
   );
   const [dateInputValue, setDateInputValue] = useState(resolvedDateInputValue);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const autoLoadSavedTeamsRef = useRef(false);
+  const lastAutoLoadItemCountRef = useRef(0);
+  const filterSourceItems = useMemo(
+    () => (statusFilter === "all" ? items : (allItems?.length ? allItems : items)),
+    [allItems, items, statusFilter],
+  );
 
   useEffect(() => {
     setDateInputValue(resolvedDateInputValue);
@@ -1181,7 +1240,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
       if (!lookup.has(key)) lookup.set(key, cleanHeadshot);
     };
 
-    for (const item of items) {
+    for (const item of filterSourceItems) {
       const parsedNames = parsePlayAthletes(item.text);
       const primaryHeadshot = cleanValue(item.athleteHeadshot);
       const secondaryHeadshot = cleanValue(item.athlete2Headshot);
@@ -1194,7 +1253,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
     }
 
     return lookup;
-  }, [items]);
+  }, [filterSourceItems]);
   const athleteAliasLookup = useMemo(() => {
     const aliasCounts = new Map<string, number>();
     const aliasNames = new Map<string, string>();
@@ -1210,7 +1269,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
       }
     };
 
-    for (const item of items) {
+    for (const item of filterSourceItems) {
       rememberAlias(item.athleteName);
       rememberAlias(item.athlete2Name);
       for (const parsedName of parsePlayAthletes(item.text)) {
@@ -1228,11 +1287,11 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
       }
     }
     return lookup;
-  }, [items]);
+  }, [filterSourceItems]);
   const displayItems = useMemo<DisplayFeedItem[]>(() => {
     const pitchContextByGame = new Map<string, PitchMatchup>();
 
-    return [...items]
+    return [...filterSourceItems]
       .reverse()
       .map((item) => {
         const normalizedText = normalizeText(item.text);
@@ -1308,7 +1367,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
         };
       })
       .reverse();
-  }, [items, athleteAliasLookup]);
+  }, [filterSourceItems, athleteAliasLookup]);
 
   // Track which IDs are "new" for entry animation
   const knownIdsRef = useRef<Set<string>>(new Set());
@@ -1317,7 +1376,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
   useEffect(() => {
     const prevKnown = knownIdsRef.current;
     const freshIds = new Set<string>();
-    for (const item of items) {
+    for (const item of filterSourceItems) {
       if (!prevKnown.has(item.id)) freshIds.add(item.id);
     }
     if (freshIds.size > 0) {
@@ -1326,16 +1385,47 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
       for (const id of freshIds) prevKnown.add(id);
       return () => clearTimeout(timer);
     }
-  }, [items]);
+  }, [filterSourceItems]);
 
   const filtered = useMemo(() => {
     let result = displayItems.filter((i) => !isLowSignalActivity(i));
-    if (teamFilter === "my-teams") result = result.filter((i) => i.isSavedTeam);
+    if (teamFilter === "my-teams") {
+      result = result.filter((item) =>
+        item.isSavedTeam || savedTeams.some((team) =>
+          matchesSavedTeamSide({ name: item.homeTeam, shortName: item.homeAbbr || "" }, item.league, team) ||
+          matchesSavedTeamSide({ name: item.awayTeam, shortName: item.awayAbbr || "" }, item.league, team)
+        )
+      );
+    }
     // When parent handles league filtering server-side, skip client-side league filter
     if (leagueFilter !== "ALL" && !onLeagueChange) result = result.filter((i) => i.league === leagueFilter);
     if (statusFilter !== "all") result = result.filter((i) => i.status === statusFilter);
     return result;
-  }, [displayItems, teamFilter, leagueFilter, statusFilter, onLeagueChange]);
+  }, [displayItems, teamFilter, leagueFilter, statusFilter, onLeagueChange, savedTeams]);
+
+  useEffect(() => {
+    if (teamFilter !== "my-teams") {
+      autoLoadSavedTeamsRef.current = false;
+      lastAutoLoadItemCountRef.current = 0;
+      return;
+    }
+
+    if (!hasMore || !onLoadMore || loading) {
+      return;
+    }
+
+    if (autoLoadSavedTeamsRef.current && lastAutoLoadItemCountRef.current === items.length) {
+      return;
+    }
+
+    autoLoadSavedTeamsRef.current = true;
+    lastAutoLoadItemCountRef.current = items.length;
+    const timer = window.setTimeout(() => {
+      onLoadMore();
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [hasMore, items.length, loading, onLoadMore, teamFilter]);
 
   return (
     <section>
@@ -1436,7 +1526,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
                 className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${
                   statusFilter === s
                     ? s === "live"
-                      ? "bg-red-500/15 text-red-400"
+          ? "surface-feed-alert"
                       : "bg-accent/15 text-accent"
                     : "text-muted hover:text-foreground"
                 }`}
@@ -1476,7 +1566,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
           className="bg-surface border border-muted/20 rounded-xl min-h-[420px] lg:min-h-[520px] max-h-[600px] overflow-y-auto custom-scrollbar"
         >
           {error && items.length > 0 && (
-            <div className="sticky top-0 z-10 border-b border-amber-500/10 bg-amber-500/10 px-4 py-2 text-[11px] text-amber-100 backdrop-blur-sm">
+          <div className="surface-feed-warning sticky top-0 z-10 px-4 py-2 text-[11px]">
               {error} Showing the last loaded plays.
             </div>
           )}
@@ -1498,7 +1588,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
             </div>
           ) : error && items.length === 0 ? (
             <div className="min-h-[420px] lg:min-h-[520px] p-8 flex flex-col items-center justify-center gap-2 text-center">
-              <p className="text-sm text-amber-100">{error}</p>
+            <p className="text-sm text-warning">{error}</p>
               <p className="max-w-md text-xs text-muted">
                 The feed could not reach the local API on localhost:8000, so this is a connection issue rather than a real empty activity window.
               </p>
@@ -1607,7 +1697,7 @@ export default function LiveActivityFeed({ items, activityDate, onDateChange, ha
                   className={`px-2 py-1.5 rounded-md text-[11px] font-semibold transition-colors text-left ${
                     statusFilter === s
                       ? s === "live"
-                        ? "bg-red-500/15 text-red-400"
+          ? "surface-feed-alert"
                         : "bg-accent/15 text-accent"
                       : "text-muted hover:text-foreground hover:bg-muted/5"
                   }`}

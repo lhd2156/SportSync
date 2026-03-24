@@ -32,7 +32,7 @@ async def get_current_user(
     token = credentials.credentials
 
     # Reject tokens that were blacklisted on logout
-    if redis_client and is_token_blacklisted(redis_client, token):
+    if is_token_blacklisted(redis_client, token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",

@@ -10,13 +10,13 @@ import {
   YAxis,
 } from "recharts";
 
-interface ChartSeries {
+type ChartSeries = {
   dataKey: string;
   color: string;
   name?: string;
-}
+};
 
-interface StatChartProps {
+type StatChartProps = {
   title: string;
   subtitle?: string;
   type: "line" | "bar";
@@ -24,7 +24,7 @@ interface StatChartProps {
   xKey: string;
   series: ChartSeries[];
   valueFormatter?: (value: number | string) => string;
-}
+};
 
 export default function StatChart({
   title,
@@ -46,10 +46,10 @@ export default function StatChart({
         <ResponsiveContainer width="100%" height="100%">
           {type === "line" ? (
             <LineChart data={data}>
-              <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
-              <XAxis dataKey={xKey} tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} axisLine={false} />
+              <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+              <XAxis dataKey={xKey} tick={{ fill: "var(--chart-axis)", fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--chart-axis)", fontSize: 12 }}
                 tickLine={false}
                 axisLine={false}
                 width={32}
@@ -59,10 +59,10 @@ export default function StatChart({
                   valueFormatter ? valueFormatter(value as number | string) : String(value)
                 }
                 contentStyle={{
-                  backgroundColor: "#0f172a",
-                  border: "1px solid rgba(148,163,184,0.18)",
+                  backgroundColor: "var(--chart-tooltip-slate)",
+                  border: "1px solid var(--chart-tooltip-border)",
                   borderRadius: "16px",
-                  color: "#e2e8f0",
+                  color: "var(--chart-tooltip-text)",
                 }}
               />
               {series.map((item) => (
@@ -80,10 +80,10 @@ export default function StatChart({
             </LineChart>
           ) : (
             <BarChart data={data}>
-              <CartesianGrid stroke="rgba(148,163,184,0.12)" vertical={false} />
-              <XAxis dataKey={xKey} tick={{ fill: "#94a3b8", fontSize: 12 }} tickLine={false} axisLine={false} />
+              <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
+              <XAxis dataKey={xKey} tick={{ fill: "var(--chart-axis)", fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis
-                tick={{ fill: "#94a3b8", fontSize: 12 }}
+                tick={{ fill: "var(--chart-axis)", fontSize: 12 }}
                 tickLine={false}
                 axisLine={false}
                 width={32}
@@ -93,10 +93,10 @@ export default function StatChart({
                   valueFormatter ? valueFormatter(value as number | string) : String(value)
                 }
                 contentStyle={{
-                  backgroundColor: "#0f172a",
-                  border: "1px solid rgba(148,163,184,0.18)",
+                  backgroundColor: "var(--chart-tooltip-slate)",
+                  border: "1px solid var(--chart-tooltip-border)",
                   borderRadius: "16px",
-                  color: "#e2e8f0",
+                  color: "var(--chart-tooltip-text)",
                 }}
               />
               {series.map((item) => (

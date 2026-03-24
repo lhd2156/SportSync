@@ -11,22 +11,26 @@ function makeSlug(name: string): string {
     .replace(/^-|-$/g, "");
 }
 
-interface TeamCardProps {
+type TeamCardProps = {
   team: Team;
   isFollowing: boolean;
-}
+};
 
 export default function TeamCard({ team, isFollowing }: TeamCardProps) {
   const navigate = useNavigate();
-  const accent = team.color?.startsWith("#") ? team.color : team.color ? `#${team.color}` : "#2E8EFF";
+  const accent = team.color?.startsWith("#") ? team.color : team.color ? `#${team.color}` : "var(--accent)";
   const normalizedCity = (team.city || "").trim();
   const normalizedName = team.name.trim().toLowerCase();
-  const subtitle =
-    normalizedCity &&
-    normalizedCity.toLowerCase() !== normalizedName &&
-    !normalizedName.startsWith(normalizedCity.toLowerCase())
-      ? normalizedCity
-      : "";
+  const normalizedShortName = (team.shortName || "").trim().toLowerCase();
+  const normalizedCityLower = normalizedCity.toLowerCase();
+  const hasDistinctSubtitle =
+    !!normalizedCity &&
+    normalizedCityLower !== normalizedName &&
+    normalizedCityLower !== normalizedShortName &&
+    !normalizedName.startsWith(normalizedCityLower) &&
+    !normalizedCityLower.endsWith(normalizedName) &&
+    (!normalizedShortName || !normalizedCityLower.endsWith(normalizedShortName));
+  const subtitle = hasDistinctSubtitle ? normalizedCity : "";
   const slug = makeSlug(team.name);
 
   return (
@@ -45,7 +49,7 @@ export default function TeamCard({ team, isFollowing }: TeamCardProps) {
       <div
         className="pointer-events-none absolute inset-x-0 top-0 h-28 opacity-80"
         style={{
-          background: `linear-gradient(180deg, ${accent}20 0%, rgba(10,14,30,0) 100%)`,
+          background: `linear-gradient(180deg, color-mix(in srgb, ${accent} 20%, transparent) 0%, transparent 100%)`,
         }}
       />
 
@@ -54,7 +58,7 @@ export default function TeamCard({ team, isFollowing }: TeamCardProps) {
           <SafeAvatar
             src={team.logoUrl}
             alt={team.name}
-            className="flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/20 bg-background/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+            className="flex h-16 w-16 items-center justify-center rounded-2xl border border-accent/20 bg-background/80 shadow-[inset_0_1px_0_var(--overlay-white-hairline)]"
             imgClassName="h-11 w-11 object-contain"
             loadingContent={<div className="h-11 w-11 animate-pulse rounded-xl bg-accent/10" />}
             fallback={

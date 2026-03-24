@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,9 +99,70 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, restrict to allowed origins
-		return true
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin == "" {
+			return true
+		}
+
+		allowlist := getAllowedOrigins()
+		for _, allowed := range allowlist {
+			if origin == allowed {
+				return true
+			}
+		}
+
+		if sameHostOrigin(r, origin) {
+			return true
+		}
+
+		return false
 	},
+}
+
+func sameHostOrigin(r *http.Request, origin string) bool {
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	originHost := strings.TrimSpace(originURL.Hostname())
+	if originHost == "" {
+		return false
+	}
+
+	requestHost := strings.TrimSpace(r.Host)
+	if requestHost == "" {
+		return false
+	}
+
+	if host, _, err := net.SplitHostPort(requestHost); err == nil {
+		requestHost = host
+	}
+
+	return strings.EqualFold(originHost, requestHost)
+}
+
+func getAllowedOrigins() []string {
+	rawOrigins := strings.TrimSpace(os.Getenv("CORS_ORIGINS"))
+	if rawOrigins == "" {
+		rawOrigins = strings.TrimSpace(os.Getenv("PRODUCTION_DOMAIN"))
+	}
+
+	if rawOrigins == "" {
+		log.Printf("CORS_ORIGINS/PRODUCTION_DOMAIN not configured for websocket allowlist")
+		return []string{}
+	}
+
+	parts := strings.Split(rawOrigins, ",")
+	allowed := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			allowed = append(allowed, trimmed)
+		}
+	}
+
+	return allowed
 }
 
 // HandleWebSocket is the Gin handler for /ws/scores
@@ -229,7 +293,7 @@ func (h *Hub) BroadcastScoreUpdate(update ScoreUpdate) {
 func verifyJWT(tokenString string) (string, error) {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "sportsync-dev-secret-change-in-production"
+		return "", fmt.Errorf("JWT_SECRET is not configured")
 	}
 
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {

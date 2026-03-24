@@ -10,7 +10,7 @@ import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 import Logo from "../components/Logo";
 import Footer from "../components/Footer";
-import GoogleSignInButton from "../components/GoogleSignInButton";
+import GoogleSignInButton, { GOOGLE_SIGN_IN_AVAILABLE } from "../components/GoogleSignInButton";
 import { getSafeRedirectTarget } from "../utils/redirect";
 
 export default function LoginPage() {
@@ -60,7 +60,7 @@ export default function LoginPage() {
           <div className="bg-surface border border-muted/15 rounded-2xl p-6 shadow-lg shadow-black/20">
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
+                <div className="surface-error-card surface-status-negative text-sm rounded-lg px-4 py-3">
                   {error}
                 </div>
               )}
@@ -76,6 +76,7 @@ export default function LoginPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   className={inputCls}
                   placeholder="you@example.com"
+                  autoComplete="email"
                 />
               </div>
 
@@ -90,6 +91,7 @@ export default function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   className={inputCls}
                   placeholder="Enter your password"
+                  autoComplete="current-password"
                 />
               </div>
 
@@ -104,6 +106,12 @@ export default function LoginPage() {
                   />
                   <span className="text-sm text-foreground-base select-none">Remember me</span>
                 </label>
+                <Link
+                  to={ROUTES.FORGOT_PASSWORD}
+                  className="text-sm text-accent hover:text-accent-hover transition-colors"
+                >
+                  Forgot password?
+                </Link>
               </div>
 
               {/* Submit */}
@@ -115,15 +123,17 @@ export default function LoginPage() {
                 {isSubmitting ? "Signing in..." : "Sign In"}
               </button>
 
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-muted/15" />
-                <span className="text-muted/40 text-xs">or</span>
-                <div className="flex-1 h-px bg-muted/15" />
-              </div>
+              {GOOGLE_SIGN_IN_AVAILABLE ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-muted/15" />
+                    <span className="text-muted/40 text-xs">or</span>
+                    <div className="flex-1 h-px bg-muted/15" />
+                  </div>
 
-              {/* Google */}
-              <GoogleSignInButton text="signin_with" />
+                  <GoogleSignInButton text="signin_with" />
+                </>
+              ) : null}
             </form>
           </div>
 

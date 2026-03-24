@@ -8,11 +8,11 @@ import { memo } from "react";
 import FavoriteIcon from "./FavoriteIcon";
 import { SUPPORTED_SPORTS } from "../constants";
 
-interface SportTabBarProps {
+type SportTabBarProps = {
   activeSport: string;
   onSelectSport: (sportId: string) => void;
   hasSavedTeams?: boolean;
-}
+};
 
 function SportTabBar({ activeSport, onSelectSport, hasSavedTeams }: SportTabBarProps) {
   const tabs = [
@@ -33,7 +33,7 @@ function SportTabBar({ activeSport, onSelectSport, hasSavedTeams }: SportTabBarP
             onClick={() => onSelectSport(tab.id)}
             className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm whitespace-nowrap transition-all ${
               isActive
-                ? "border-accent bg-accent text-white shadow-[0_10px_24px_-18px_rgba(46,142,255,0.8)]"
+                ? "border-accent bg-accent text-white surface-accent-choice-strong"
                 : "border-muted/15 bg-surface/60 text-muted hover:border-muted/30 hover:text-foreground"
             }`}
           >

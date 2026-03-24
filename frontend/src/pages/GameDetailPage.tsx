@@ -5,21 +5,52 @@
  * - Live score header with team logos, records, and status
  * - Tab navigation: Play-by-Play, Box Score, Game Leaders, Game Info
  * - Real ESPN data: actual plays, player stats, game leaders
- * - 10s auto-refresh for live games
+ * - 5s auto-refresh for live games
  */
 import { memo, useEffect, useMemo, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import Navbar from "../components/Navbar";
 import LiveBadge from "../components/LiveBadge";
 import Footer from "../components/Footer";
 import apiClient from "../api/client";
 import { API } from "../constants";
+import type {
+  BoxScoreTeam,
+  DerivedLeadersPayload,
+  DerivedTeamLeaders,
+  DisplayPlay,
+  EspnAthlete,
+  EspnAthleteStatsPayload,
+  EspnAthleteStatRow,
+  EspnBoxscorePlayerTeam,
+  EspnCompetition,
+  EspnCompetitor,
+  EspnLeaderCategory,
+  EspnLineScore,
+  EspnLogo,
+  EspnPlayRecord,
+  EspnStatistic,
+  EspnStatisticGroup,
+  EspnStatusBlob,
+  EspnSummary,
+  EspnSummaryLeaderGroup,
+  EspnTeamBlob,
+  GameData,
+  GameDetailResponse,
+  Leader,
+  Play,
+  PlayerStat,
+  ResolvedPlayTeam,
+  TeamDetail,
+} from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const LIVE_GAME_REFRESH_MS = 5000;
 const loadedHeadshotSources = new Set<string>();
-const failedHeadshotChains = new Set<string>();
-const nbaRosterCache = new Map<string, any[]>();
+const failedHeadshotChains = new Map<string, number>();
+const FAILED_HEADSHOT_RETRY_MS = 30000;
+const nbaRosterCache = new Map<string, EspnAthlete[]>();
 const nbaAthleteStatCache = new Map<string, Record<string, number> | null>();
 
 /* ── Inline SVG Icons ── */
@@ -61,14 +92,18 @@ function getHeadshotUrl(headshot: unknown): string {
   return "";
 }
 
-function getTeamLogoUrl(team: any): string {
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function getTeamLogoUrl(team: EspnTeamBlob | Record<string, unknown> | null | undefined): string {
   const directLogo = cleanValue(String(team?.logo || ""));
   if (directLogo) return directLogo;
 
-  const logos = Array.isArray(team?.logos) ? team.logos : [];
+  const logos = Array.isArray(team?.logos) ? (team.logos as EspnLogo[]) : [];
   const pickByRel = (relName: string) =>
     logos.find(
-      (logo: any) =>
+      (logo: EspnLogo) =>
         Array.isArray(logo?.rel) &&
         logo.rel.includes(relName) &&
         !logo.rel.includes("dark") &&
@@ -81,12 +116,12 @@ function getTeamLogoUrl(team: any): string {
         pickByRel("default") ||
         pickByRel("primary_logo_on_white_color") ||
         logos.find(
-          (logo: any) =>
+          (logo: EspnLogo) =>
             Array.isArray(logo?.rel) &&
             !logo.rel.includes("dark") &&
             cleanValue(String(logo?.href || "")),
         )?.href ||
-        logos.find((logo: any) => cleanValue(String(logo?.href || "")))?.href ||
+        logos.find((logo: EspnLogo) => cleanValue(String(logo?.href || "")))?.href ||
         "",
     ),
   );
@@ -200,6 +235,9 @@ function getInitials(name: string): string {
     .join("");
 }
 
+void sanitizeStatLine;
+void sanitizeSafeDisplayStatLine;
+
 function sanitizeRenderedStatLine(value?: string | null): string {
   const cleaned = cleanValue(value);
   if (!cleaned) return "";
@@ -213,6 +251,10 @@ function sanitizeRenderedStatLine(value?: string | null): string {
     .join(" | ");
 }
 
+function normalizeText(text: string): string {
+  return normalizeDisplayEncoding(text).replace(/\s+/g, " ").trim();
+}
+
 function isOfficialHeadshotUrl(url: string): boolean {
   const cleanUrl = cleanValue(url).toLowerCase();
   return (
@@ -222,10 +264,27 @@ function isOfficialHeadshotUrl(url: string): boolean {
   );
 }
 
+const GENERIC_INFERRED_PLAY_ACTORS = new Set([
+  "shot clock",
+  "shot clock violation",
+  "team",
+  "timeout",
+  "jump ball",
+  "foul",
+  "official timeout",
+  "tv timeout",
+  "full timeout",
+  "delay of game",
+  "defensive three seconds",
+  "defensive 3 seconds",
+  "defensive 3",
+]);
+
 function buildHeadshotSources(src: string, name: string, league?: string, teamName?: string): string[] {
   const cleanSrc = cleanValue(src);
   const cleanName = cleanValue(name);
   const cleanLeague = cleanValue(league);
+  const cleanLeagueKey = cleanLeague.toUpperCase();
   const cleanTeamName = cleanValue(teamName);
   if (!cleanSrc && !cleanName) return [];
 
@@ -242,6 +301,7 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   if (cleanName) params.set("name", cleanName);
   if (cleanLeague) params.set("league", cleanLeague);
   if (cleanTeamName) params.set("team", cleanTeamName);
+  params.set("placeholder", "false");
   const proxyUrl = params.toString()
     ? `${API_BASE_URL}${API.ESPN_HEADSHOT}?${params.toString()}`
     : "";
@@ -250,6 +310,7 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   if (cleanName) fallbackParams.set("name", cleanName);
   if (cleanLeague) fallbackParams.set("league", cleanLeague);
   if (cleanTeamName) fallbackParams.set("team", cleanTeamName);
+  fallbackParams.set("placeholder", "false");
   const proxyFallbackUrl = fallbackParams.toString()
     ? `${API_BASE_URL}${API.ESPN_HEADSHOT}?${fallbackParams.toString()}`
     : "";
@@ -258,30 +319,90 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
   const prefersDirectOfficialHeadshot = isOfficialHeadshotUrl(cleanSrc);
 
   if (!cleanSrc) {
-    add(proxyFallbackUrl);
     add(proxyUrl);
+    add(proxyFallbackUrl);
     return sources;
   }
 
-  if (isPremierLeagueHeadshot) {
+  if (prefersDirectOfficialHeadshot || isPremierLeagueHeadshot || cleanLeagueKey === "MLB") {
     add(cleanSrc);
-    add(proxyFallbackUrl);
     add(proxyUrl);
+    add(proxyFallbackUrl);
     return sources;
-  }
-
-  if (prefersDirectOfficialHeadshot) {
-    add(cleanSrc);
   }
 
   add(proxyUrl);
   add(proxyFallbackUrl);
+  add(cleanSrc);
 
-  if (isOfficialHeadshotUrl(cleanSrc) && !prefersDirectOfficialHeadshot) {
-    add(cleanSrc);
+  try {
+    const parsed = new URL(cleanSrc);
+    if (parsed.hostname.includes("espncdn.com") && parsed.pathname === "/combiner/i") {
+      const imgPath = parsed.searchParams.get("img");
+      if (imgPath) {
+        add(`https://a.espncdn.com${imgPath}`);
+        add(`https://a.espncdn.com/combiner/i?img=${encodeURIComponent(imgPath)}&w=160&h=160`);
+      }
+    }
+  } catch {
+    // Ignore malformed URLs and fall back to the original source list.
   }
 
   return sources;
+}
+
+function parsePlayAthletes(text: string): string[] {
+  const normalizedText = normalizeText(text);
+  const versusMatch = normalizedText.match(/[\u2013\u2014-]\s*(.+?)\s+vs\s+(.+)$/i);
+  if (versusMatch) {
+    return [versusMatch[1], versusMatch[2]].map((part) => cleanValue(part));
+  }
+
+  const pitchesToMatch = normalizedText.match(/^(.+?)\s+pitches to\s+(.+)$/i);
+  if (pitchesToMatch) {
+    return [pitchesToMatch[1], pitchesToMatch[2]].map((part) => cleanValue(part));
+  }
+
+  return [];
+}
+
+function extractLeadAthlete(text: string): string {
+  const normalizedText = normalizeText(text);
+  const leadMatch = normalizedText.match(
+    /^(.+?)\s+(?:pitches?\s+to|struck out|singled|doubled|tripled|homered|grounded|flied|lined|popped|walked|hit by pitch|reached|stole|advanced|scored|fouled|bunted|sacrificed|tagged|picked off|grounds|flies|lines|pops|pass|scrambles?|sacked|punts?|kicks?|kneels?|spikes?|right end|left end|right tackle|left tackle|right guard|left guard|up the middle|offensive rebound|defensive rebound|makes|misses|turnover|jump shot|tip shot|layup|dunk)\b/i,
+  );
+  return cleanValue(leadMatch?.[1]);
+}
+
+function isUsableInferredAthleteName(name: string): boolean {
+  const cleanedName = cleanValue(name);
+  if (!cleanedName) return false;
+
+  if (GENERIC_INFERRED_PLAY_ACTORS.has(cleanedName.toLowerCase())) {
+    return false;
+  }
+
+  return /[A-Z]/.test(cleanedName);
+}
+
+function formatGenericPlayText(text: string, teamLabel: string): string {
+  const displayText = normalizeText(text);
+  const normalized = displayText.toLowerCase();
+  const cleanTeamLabel = cleanValue(teamLabel);
+
+  if (!cleanTeamLabel) {
+    return displayText;
+  }
+
+  if (normalized === "shot clock turnover" || normalized === "shot clock violation turnover") {
+    return `${cleanTeamLabel} shot clock turnover`;
+  }
+
+  if (normalized === "team turnover" || normalized === "turnover") {
+    return `${cleanTeamLabel} turnover`;
+  }
+
+  return displayText;
 }
 
 const PersonSVG = memo(function PersonSVG({ size = 16 }: { size?: number }) {
@@ -325,6 +446,7 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
   );
   const [resolvedSrc, setResolvedSrc] = useState("");
   const [isReady, setIsReady] = useState(false);
+  const hasOfficialSource = useMemo(() => imageSources.some((source) => isOfficialHeadshotUrl(source)), [imageSources]);
 
   useEffect(() => {
     if (!imageSources.length) {
@@ -337,15 +459,17 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
     setResolvedSrc("");
     setIsReady(false);
 
-    if (failedHeadshotChains.has(sourceKey)) {
+    const failedAt = failedHeadshotChains.get(sourceKey) ?? 0;
+    if (failedAt && Date.now() - failedAt < FAILED_HEADSHOT_RETRY_MS && !hasOfficialSource) {
       setIsReady(true);
       return;
     }
+    failedHeadshotChains.delete(sourceKey);
 
     const resolveCandidate = (index: number) => {
       if (cancelled) return;
       if (index >= imageSources.length) {
-        failedHeadshotChains.add(sourceKey);
+        failedHeadshotChains.set(sourceKey, Date.now());
         setResolvedSrc("");
         setIsReady(true);
         return;
@@ -375,7 +499,7 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
     return () => {
       cancelled = true;
     };
-  }, [imageSources, sourceKey]);
+  }, [imageSources, sourceKey, hasOfficialSource]);
 
   const isSoccerLeague = league === "EPL" || league === "MLS";
   const imageSizingClass =
@@ -388,9 +512,9 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
   if (!resolvedSrc) {
     if (!isReady) {
       return (
-        <div className={`${className} relative overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(33,46,74,0.9),_rgba(16,21,34,0.98)_72%)] border border-[#2a3654] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]`}>
-          <div className="absolute inset-[3px] rounded-full border border-[#334469]/40" />
-          <div className="absolute inset-0 animate-pulse bg-[linear-gradient(135deg,rgba(255,255,255,0.03),transparent_55%)]" />
+        <div className={`${className} surface-avatar-loading`}>
+          <div className="surface-avatar-inner" />
+          <div className="surface-avatar-gloss animate-pulse" />
           <div className="relative opacity-45">
             <PersonSVG size={18} />
           </div>
@@ -400,11 +524,11 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
 
     const initials = getInitials(alt);
     return (
-      <div className={`${className} relative overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(39,52,81,0.92),_rgba(18,24,39,0.98)_72%)] border border-[#2a3654] flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]`}>
+      <div className={`${className} surface-avatar-ready`}>
         {initials ? (
           <>
-            <div className="absolute inset-[3px] rounded-full border border-[#334469]/45" />
-            <span className="relative text-[12px] font-semibold tracking-[0.08em] text-[#9eb1da]">{initials}</span>
+            <div className="surface-avatar-inner" />
+            <span className="surface-avatar-initials text-[12px] font-semibold tracking-[0.08em]">{initials}</span>
           </>
         ) : cleanFallbackSrc && cleanFallbackSrc !== cleanSrc ? (
           <img src={cleanFallbackSrc} alt="" className="h-full w-full object-contain p-[14%]" loading="lazy" />
@@ -416,7 +540,7 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
   }
 
   return (
-    <div className={`${className} relative overflow-hidden bg-[#1b1f2a] border border-[#25304a] flex items-center justify-center`}>
+    <div className={`${className} surface-avatar-image`}>
       <img
         src={resolvedSrc}
         alt={alt}
@@ -429,101 +553,6 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
 });
 
 /* ── Type definitions ── */
-interface Play {
-  id: string;
-  text: string;
-  shortText?: string;
-  type?: string;
-  playType?: string;
-  clock?: string;
-  period?: number;
-  periodText?: string;
-  statusDetail?: string;
-  scoreValue?: number;
-  scoringPlay?: boolean;
-  homeScore: string | number;
-  awayScore: string | number;
-  team?: string;
-  teamLogo?: string;
-  playTeamName?: string;
-  playTeamAbbr?: string;
-  playTeamLogo?: string;
-  athleteName: string;
-  athleteHeadshot: string;
-  athleteStats?: string;
-  athlete2Name?: string;
-  athlete2Headshot?: string;
-}
-
-interface PlayerStat {
-  name: string;
-  shortName: string;
-  headshot: unknown; // Can be string or {href, alt} object
-  position: string;
-  stats: Record<string, string>;
-}
-
-interface BoxScoreTeam {
-  teamName: string;
-  teamAbbr: string;
-  teamLogo: string;
-  players: PlayerStat[];
-  labels: string[];
-}
-
-interface Leader {
-  team: string;
-  teamAbbr: string;
-  category: string;
-  name: string;
-  value: string;
-  headshot: unknown;
-}
-
-interface TeamDetail {
-  id: string;
-  name: string;
-  abbreviation: string;
-  logo: string;
-  color: string;
-  record: string;
-  score: string;
-  leaders: { category: string; name: string; value: string; headshot: unknown }[];
-  stats: { name: string; label: string; abbreviation: string }[];
-  linescores: number[];
-}
-
-interface GameData {
-  id: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeAbbr: string;
-  awayAbbr: string;
-  homeScore: number;
-  awayScore: number;
-  homeBadge: string;
-  awayBadge: string;
-  status: string;
-  statusDetail: string;
-  league: string;
-  dateEvent: string;
-  strVenue: string;
-  strEvent: string;
-  homeDetail: TeamDetail;
-  awayDetail: TeamDetail;
-  venue: { name: string; city: string; state: string };
-  odds: { details: string; overUnder: number; spread: number } | null;
-  broadcasts: string[];
-}
-
-interface GameDetailResponse {
-  game: GameData | null;
-  plays: Play[];
-  boxScore: BoxScoreTeam[];
-  leaders: Leader[];
-  error?: string;
-}
-
 type Tab = "plays" | "boxscore" | "leaders" | "info";
 
 const DIRECT_ESPN_SUMMARY_PATHS: Record<string, string> = {
@@ -557,7 +586,7 @@ function shiftActivityDateParam(dateParam: string, days: number): string {
   return shifted.toISOString().slice(0, 10).replace(/-/g, "");
 }
 
-function parseGameStatus(statusObj: any): { status: string; statusDetail: string } {
+function parseGameStatus(statusObj: EspnStatusBlob | null | undefined): { status: string; statusDetail: string } {
   const type = statusObj?.type || {};
   const statusName = String(type.name || "");
   const statusDetail = String(type.shortDetail || type.detail || "");
@@ -583,7 +612,55 @@ function parseGameStatus(statusObj: any): { status: string; statusDetail: string
   return { status: "upcoming", statusDetail };
 }
 
-function parseTeamLeaderItems(leadersRaw: any[]): TeamDetail["leaders"] {
+function isGenericUpcomingLabel(value?: string): boolean {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return true;
+  return [
+    "scheduled",
+    "match scheduled",
+    "game scheduled",
+    "upcoming",
+    "not started",
+    "tba",
+    "tbd",
+    "to be announced",
+    "pre-match",
+    "pregame",
+  ].includes(normalized);
+}
+
+function formatScheduledLabel(scheduledAt?: string): string {
+  const kickoff = new Date(scheduledAt || "");
+  if (Number.isNaN(kickoff.getTime())) {
+    return "";
+  }
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  });
+
+  const parts = formatter.formatToParts(kickoff);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const month = values.month || "";
+  const day = values.day || "";
+  const hour = values.hour || "";
+  const minute = values.minute || "00";
+  const dayPeriod = values.dayPeriod || "";
+  const timeZoneName = values.timeZoneName || "";
+
+  if (!month || !day || !hour) {
+    return formatter.format(kickoff).replace(",", " -");
+  }
+
+  const timeCore = `${hour}:${minute}${dayPeriod ? ` ${dayPeriod}` : ""}`;
+  return `${month}/${day} - ${timeCore}${timeZoneName ? ` ${timeZoneName}` : ""}`;
+}
+
+function parseTeamLeaderItems(leadersRaw: EspnLeaderCategory[]): TeamDetail["leaders"] {
   const leaders: TeamDetail["leaders"] = [];
   for (const leaderCat of leadersRaw || []) {
     const catLeaders = leaderCat?.leaders || [];
@@ -600,7 +677,7 @@ function parseTeamLeaderItems(leadersRaw: any[]): TeamDetail["leaders"] {
   return leaders;
 }
 
-function parseTeamStats(statsRaw: any[]): TeamDetail["stats"] {
+function parseTeamStats(statsRaw: EspnStatistic[]): TeamDetail["stats"] {
   return (statsRaw || []).map((stat) => ({
     name: String(stat.displayValue || stat.name || ""),
     label: String(stat.name || ""),
@@ -608,20 +685,40 @@ function parseTeamStats(statsRaw: any[]): TeamDetail["stats"] {
   }));
 }
 
-function buildGameDataFromSummary(summary: any, league: string, eventId: string): GameData | null {
+function parseLineScoreValue(line: EspnLineScore | null | undefined): number {
+  const candidates = [
+    line?.value,
+    line?.displayValue,
+    line?.score,
+    line?.points,
+    line?.runs,
+  ];
+
+  for (const candidate of candidates) {
+    const cleaned = cleanValue(String(candidate ?? ""));
+    if (!cleaned) continue;
+
+    const match = cleaned.match(/-?\d+/);
+    if (match) {
+      return Number(match[0]);
+    }
+  }
+
+  return 0;
+}
+
+function buildGameDataFromSummary(summary: EspnSummary, league: string, eventId: string): GameData | null {
   const header = summary?.header || {};
-  const competition = (header.competitions || [])[0] || {};
-  const competitors = competition.competitors || [];
+  const competition = (header.competitions || [])[0] || ({} as EspnCompetition);
+  const competitors = asArray<EspnCompetitor>(competition.competitors);
   if (!competitors.length) return null;
 
-  let home: any = {};
-  let away: any = {};
-  let homeDetail = {} as TeamDetail;
-  let awayDetail = {} as TeamDetail;
+  let homeDetail: TeamDetail | null = null;
+  let awayDetail: TeamDetail | null = null;
 
   for (const competitor of competitors) {
     const team = competitor.team || {};
-    const teamInfo = {
+    const teamInfo: TeamDetail = {
       id: String(team.id || ""),
       name: String(team.displayName || team.shortDisplayName || ""),
       abbreviation: String(team.abbreviation || ""),
@@ -631,39 +728,66 @@ function buildGameDataFromSummary(summary: any, league: string, eventId: string)
       score: String(competitor.score || "0"),
       leaders: parseTeamLeaderItems(competitor.leaders || []),
       stats: parseTeamStats(competitor.statistics || []),
-      linescores: (competitor.linescores || []).map((line: any) => Number(line?.value || 0)),
+        linescores: (competitor.linescores || []).map((line) => parseLineScoreValue(line)),
     };
 
     if (competitor.homeAway === "home") {
-      home = teamInfo;
       homeDetail = teamInfo;
     } else {
-      away = teamInfo;
       awayDetail = teamInfo;
     }
   }
 
+  if (!homeDetail || !awayDetail) {
+    const fallbackTeams = competitors.map((competitor) => {
+      const team = competitor.team || {};
+      return {
+        id: String(team.id || ""),
+        name: String(team.displayName || team.shortDisplayName || ""),
+        abbreviation: String(team.abbreviation || ""),
+        logo: getTeamLogoUrl(team),
+        color: String(team.color || ""),
+        record: String(((competitor.records || [])[0] || {}).summary || ""),
+        score: String(competitor.score || "0"),
+        leaders: parseTeamLeaderItems(competitor.leaders || []),
+        stats: parseTeamStats(competitor.statistics || []),
+        linescores: (competitor.linescores || []).map((line) => parseLineScoreValue(line)),
+      } satisfies TeamDetail;
+    });
+
+    homeDetail = homeDetail || fallbackTeams[0] || null;
+    awayDetail = awayDetail || fallbackTeams[1] || fallbackTeams[0] || null;
+  }
+
+  if (!homeDetail || !awayDetail) {
+    return null;
+  }
+
   const venue = competition.venue || summary?.gameInfo?.venue || {};
   const oddsSource = (summary?.odds || competition.odds || [])[0] || null;
-  const broadcastsSource = summary?.broadcasts || competition.broadcasts || [];
+  const broadcastsSource = [
+    ...asArray<{ names?: string[] }>(summary?.broadcasts),
+    ...asArray<{ names?: string[] }>(competition.broadcasts),
+  ];
   const { status, statusDetail } = parseGameStatus(competition.status || {});
 
   return {
     id: String(eventId),
-    homeTeam: String(home.name || ""),
-    awayTeam: String(away.name || ""),
-    homeAbbr: String(home.abbreviation || ""),
-    awayAbbr: String(away.abbreviation || ""),
-    homeScore: Number(home.score || 0),
-    awayScore: Number(away.score || 0),
-    homeBadge: String(home.logo || ""),
-    awayBadge: String(away.logo || ""),
+    homeTeam: String(homeDetail.name || ""),
+    awayTeam: String(awayDetail.name || ""),
+    homeAbbr: String(homeDetail.abbreviation || ""),
+    awayAbbr: String(awayDetail.abbreviation || ""),
+    homeScore: Number(homeDetail.score || 0),
+    awayScore: Number(awayDetail.score || 0),
+    homeBadge: String(homeDetail.logo || ""),
+    awayBadge: String(awayDetail.logo || ""),
     status,
     statusDetail,
     league,
     dateEvent: String(competition.date || "").slice(0, 10),
+    scheduledAt: String(competition.date || ""),
     strVenue: String(venue.fullName || venue.displayName || ""),
-    strEvent: `${away.name || ""} at ${home.name || ""}`,
+    strEvent: `${awayDetail.name || ""} at ${homeDetail.name || ""}`,
     homeDetail,
     awayDetail,
     venue: {
@@ -678,24 +802,67 @@ function buildGameDataFromSummary(summary: any, league: string, eventId: string)
           spread: Number(oddsSource.spread || 0),
         }
       : null,
-    broadcasts: broadcastsSource.flatMap((broadcast: any) => broadcast?.names || []).filter(Boolean),
+    broadcasts: broadcastsSource.flatMap((broadcast) => broadcast?.names || []).filter(Boolean),
   };
 }
 
-function parseSummaryBoxScore(summary: any): BoxScoreTeam[] {
-  const boxPlayers = summary?.boxscore?.players || [];
-  return boxPlayers.map((teamBox: any) => {
+function parseSummaryBoxScore(summary: EspnSummary): BoxScoreTeam[] {
+  const boxPlayers = asArray<EspnBoxscorePlayerTeam>(summary?.boxscore?.players);
+  if (!boxPlayers.length) {
+    const boxTeams = asArray<EspnBoxscorePlayerTeam>(summary?.boxscore?.teams);
+    return boxTeams.map((teamBox) => {
+      const teamInfo = teamBox.team || {};
+      const stats: Record<string, string> = {};
+      const labels: string[] = [];
+
+      for (const stat of asArray<EspnStatistic>(teamBox.statistics)) {
+        const label = cleanValue(
+          stat.label || stat.shortDisplayName || stat.displayName || stat.abbreviation || stat.name || "",
+        );
+        const value = cleanValue(String(stat.displayValue || stat.value || ""));
+        if (!label || !value) continue;
+        stats[label] = value;
+        if (!labels.includes(label)) {
+          labels.push(label);
+        }
+      }
+
+      return {
+        teamName: String(teamInfo.displayName || ""),
+        teamAbbr: String(teamInfo.abbreviation || ""),
+        teamLogo: getTeamLogoUrl(teamInfo),
+        players: stats && Object.keys(stats).length
+          ? [{
+              name: "Team Totals",
+              shortName: "Team Totals",
+              headshot: teamInfo.logo || "",
+              position: "",
+              stats,
+            }]
+          : [],
+        labels,
+      };
+    }).filter((team: BoxScoreTeam) => team.players.length > 0);
+  }
+
+  return boxPlayers.map((teamBox) => {
     const teamInfo = teamBox.team || {};
-    const teamStats = teamBox.statistics || [];
+    const teamStats = asArray<EspnStatisticGroup>(teamBox.statistics);
     const players: PlayerStat[] = [];
+    const labels: string[] = [];
     for (const statGroup of teamStats) {
-      const labels = statGroup.labels || [];
+      const groupLabels = (statGroup.labels || []).map((label) => cleanValue(String(label))).filter(Boolean);
+      for (const label of groupLabels) {
+        if (!labels.includes(label)) {
+          labels.push(label);
+        }
+      }
       for (const athleteEntry of statGroup.athletes || []) {
         const athlete = athleteEntry.athlete || {};
         const stats: Record<string, string> = {};
-        (athleteEntry.stats || []).forEach((value: string, index: number) => {
-          const label = labels[index];
-          if (label) stats[label] = value;
+        (athleteEntry.stats || []).forEach((value, index) => {
+          const label = groupLabels[index];
+          if (label) stats[label] = cleanValue(String(value));
         });
         players.push({
           name: String(athlete.displayName || ""),
@@ -711,16 +878,9 @@ function parseSummaryBoxScore(summary: any): BoxScoreTeam[] {
       teamAbbr: String(teamInfo.abbreviation || ""),
       teamLogo: getTeamLogoUrl(teamInfo),
       players,
-      labels: teamStats[0]?.labels || [],
+      labels,
     };
   });
-}
-
-type DerivedTeamLeaders = TeamDetail["leaders"];
-
-interface DerivedLeadersPayload {
-  leaders: Leader[];
-  byTeamKey: Record<string, DerivedTeamLeaders>;
 }
 
 function parseNumericStat(value: unknown): number {
@@ -747,7 +907,11 @@ function getLabeledStat(labels: string[], stats: string[], label: string): strin
   return index >= 0 ? cleanValue(stats[index]) : "";
 }
 
-function registerTeamLeaders(target: Record<string, DerivedTeamLeaders>, teamInfo: any, leaders: DerivedTeamLeaders) {
+function registerTeamLeaders(
+  target: Record<string, DerivedTeamLeaders>,
+  teamInfo: EspnTeamBlob | null | undefined,
+  leaders: DerivedTeamLeaders,
+) {
   if (!leaders.length) return;
 
   const keys = [
@@ -780,16 +944,19 @@ function isMlbPitchingSection(labels: string[]): boolean {
   return normalized.has("IP") && normalized.has("ER") && normalized.has("K");
 }
 
-function buildMlbBatterLeader(teamInfo: any, section: any): { leader: Leader; teamLeader: DerivedTeamLeaders[number] } | null {
-  const labels = (section?.labels || []).map((label: any) => cleanValue(String(label)));
-  const athletes = section?.athletes || [];
+function buildMlbBatterLeader(
+  teamInfo: EspnTeamBlob | null | undefined,
+  section: EspnStatisticGroup | null | undefined,
+): { leader: Leader; teamLeader: DerivedTeamLeaders[number] } | null {
+  const labels = (section?.labels || []).map((label) => cleanValue(String(label)));
+  const athletes = asArray<EspnAthleteStatRow>(section?.athletes);
   if (!labels.length || !athletes.length) return null;
 
-  let bestEntry: any = null;
+  let bestEntry: EspnAthleteStatRow | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const athleteEntry of athletes) {
-    const stats = (athleteEntry?.stats || []).map((value: any) => cleanValue(String(value)));
+    const stats = (athleteEntry?.stats || []).map((value) => cleanValue(String(value)));
     const rbi = parseNumericStat(getLabeledStat(labels, stats, "RBI"));
     const hr = parseNumericStat(getLabeledStat(labels, stats, "HR"));
     const hits = parseNumericStat(getLabeledStat(labels, stats, "H"));
@@ -807,7 +974,7 @@ function buildMlbBatterLeader(teamInfo: any, section: any): { leader: Leader; te
   if (!bestEntry) return null;
 
   const athlete = bestEntry.athlete || {};
-  const stats = (bestEntry.stats || []).map((value: any) => cleanValue(String(value)));
+  const stats = (bestEntry.stats || []).map((value) => cleanValue(String(value)));
   const hAb = getLabeledStat(labels, stats, "H-AB");
   const rbi = parseNumericStat(getLabeledStat(labels, stats, "RBI"));
   const hr = parseNumericStat(getLabeledStat(labels, stats, "HR"));
@@ -842,16 +1009,19 @@ function buildMlbBatterLeader(teamInfo: any, section: any): { leader: Leader; te
   };
 }
 
-function buildMlbPitcherLeader(teamInfo: any, section: any): { leader: Leader; teamLeader: DerivedTeamLeaders[number] } | null {
-  const labels = (section?.labels || []).map((label: any) => cleanValue(String(label)));
-  const athletes = section?.athletes || [];
+function buildMlbPitcherLeader(
+  teamInfo: EspnTeamBlob | null | undefined,
+  section: EspnStatisticGroup | null | undefined,
+): { leader: Leader; teamLeader: DerivedTeamLeaders[number] } | null {
+  const labels = (section?.labels || []).map((label) => cleanValue(String(label)));
+  const athletes = asArray<EspnAthleteStatRow>(section?.athletes);
   if (!labels.length || !athletes.length) return null;
 
-  let bestEntry: any = null;
+  let bestEntry: EspnAthleteStatRow | null = null;
   let bestScore = Number.NEGATIVE_INFINITY;
 
   for (const athleteEntry of athletes) {
-    const stats = (athleteEntry?.stats || []).map((value: any) => cleanValue(String(value)));
+    const stats = (athleteEntry?.stats || []).map((value) => cleanValue(String(value)));
     const outs = parseBaseballInningsToOuts(getLabeledStat(labels, stats, "IP"));
     const strikeouts = parseNumericStat(getLabeledStat(labels, stats, "K"));
     const earnedRuns = parseNumericStat(getLabeledStat(labels, stats, "ER"));
@@ -868,7 +1038,7 @@ function buildMlbPitcherLeader(teamInfo: any, section: any): { leader: Leader; t
   if (!bestEntry) return null;
 
   const athlete = bestEntry.athlete || {};
-  const stats = (bestEntry.stats || []).map((value: any) => cleanValue(String(value)));
+  const stats = (bestEntry.stats || []).map((value) => cleanValue(String(value)));
   const inningsPitched = getLabeledStat(labels, stats, "IP");
   const strikeouts = parseNumericStat(getLabeledStat(labels, stats, "K"));
   const earnedRuns = parseNumericStat(getLabeledStat(labels, stats, "ER"));
@@ -902,18 +1072,22 @@ function buildMlbPitcherLeader(teamInfo: any, section: any): { leader: Leader; t
   };
 }
 
-function deriveMlbFallbackLeaders(summary: any): DerivedLeadersPayload {
+function deriveMlbFallbackLeaders(summary: EspnSummary): DerivedLeadersPayload {
   const byTeamKey: Record<string, DerivedTeamLeaders> = {};
   const leaders: Leader[] = [];
-  const boxPlayers = summary?.boxscore?.players || [];
+  const boxPlayers = asArray<EspnBoxscorePlayerTeam>(summary?.boxscore?.players);
 
   for (const teamBox of boxPlayers) {
     const teamInfo = teamBox?.team || {};
     const teamLeaders: DerivedTeamLeaders = [];
-    const sections = teamBox?.statistics || [];
+    const sections = asArray<EspnStatisticGroup>(teamBox?.statistics);
 
-    const battingSection = sections.find((section: any) => isMlbBattingSection((section?.labels || []).map((label: any) => String(label))));
-    const pitchingSection = sections.find((section: any) => isMlbPitchingSection((section?.labels || []).map((label: any) => String(label))));
+    const battingSection = sections.find((section) =>
+      isMlbBattingSection((section?.labels || []).map((label) => String(label))),
+    );
+    const pitchingSection = sections.find((section) =>
+      isMlbPitchingSection((section?.labels || []).map((label) => String(label))),
+    );
 
     const battingLeader = buildMlbBatterLeader(teamInfo, battingSection);
     const pitchingLeader = buildMlbPitcherLeader(teamInfo, pitchingSection);
@@ -969,32 +1143,25 @@ function mergeTeamLeaderItems(
   return merged;
 }
 
-async function fetchJsonNoStore(url: string): Promise<any | null> {
-  try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) return null;
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-async function fetchNbaRoster(teamId: string): Promise<any[]> {
+async function fetchNbaRoster(teamId: string): Promise<EspnAthlete[]> {
   const cacheKey = cleanValue(teamId);
   if (!cacheKey) return [];
   if (nbaRosterCache.has(cacheKey)) {
     return nbaRosterCache.get(cacheKey) || [];
   }
 
-  const payload = await fetchJsonNoStore(
-    `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${encodeURIComponent(cacheKey)}/roster`,
-  );
-  const athletes = Array.isArray(payload?.athletes) ? payload.athletes : [];
+  let athletes: EspnAthlete[] = [];
+  try {
+    const response = await apiClient.get(`${API.ESPN_NBA_ROSTER}/${encodeURIComponent(cacheKey)}`);
+    athletes = Array.isArray(response.data?.athletes) ? (response.data.athletes as EspnAthlete[]) : [];
+  } catch {
+    athletes = [];
+  }
   nbaRosterCache.set(cacheKey, athletes);
   return athletes;
 }
 
-function readNbaStatValue(payload: any, statName: string): number {
+function readNbaStatValue(payload: EspnAthleteStatsPayload | null | undefined, statName: string): number {
   const categories = payload?.splits?.categories || [];
   for (const category of categories) {
     for (const stat of category?.stats || []) {
@@ -1027,9 +1194,15 @@ async function fetchNbaAthleteAverages(
     return nbaAthleteStatCache.get(cacheKey) || null;
   }
 
-  const payload = await fetchJsonNoStore(
-    `https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/seasons/${seasonYear}/types/${seasonType}/athletes/${encodeURIComponent(cleanId)}/statistics/0?lang=en&region=us`,
-  );
+  let payload: EspnAthleteStatsPayload | null = null;
+  try {
+    const response = await apiClient.get(
+      `${API.ESPN_NBA_ATHLETE_STATS}/${seasonYear}/${seasonType}/${encodeURIComponent(cleanId)}`,
+    );
+    payload = response.data?.available ? (response.data.data as EspnAthleteStatsPayload) : null;
+  } catch {
+    payload = null;
+  }
 
   if (!payload) {
     nbaAthleteStatCache.set(cacheKey, null);
@@ -1054,10 +1227,10 @@ async function fetchNbaAthleteAverages(
   return averages;
 }
 
-async function deriveNbaFallbackLeaders(summary: any): Promise<DerivedLeadersPayload> {
+async function deriveNbaFallbackLeaders(summary: EspnSummary): Promise<DerivedLeadersPayload> {
   const headerSeason = summary?.header?.season || {};
   const competition = (summary?.header?.competitions || [])[0] || {};
-  const competitors = competition?.competitors || [];
+  const competitors = asArray<EspnCompetitor>(competition?.competitors);
   const seasonYear = Number(headerSeason?.year || new Date(competition?.date || Date.now()).getUTCFullYear());
   const seasonType = Number(headerSeason?.type || 2);
   const categoryDefs = [
@@ -1086,14 +1259,14 @@ async function deriveNbaFallbackLeaders(summary: any): Promise<DerivedLeadersPay
   const byTeamKey: Record<string, DerivedTeamLeaders> = {};
 
   await Promise.all(
-    competitors.map(async (competitor: any) => {
+    competitors.map(async (competitor) => {
       const teamInfo = competitor?.team || {};
       const roster = await fetchNbaRoster(String(teamInfo?.id || ""));
       if (!roster.length) return;
 
       const athleteRows = (
         await Promise.all(
-          roster.map(async (athlete: any) => ({
+          roster.map(async (athlete) => ({
             athlete,
             averages: await fetchNbaAthleteAverages(
               String(athlete?.id || ""),
@@ -1152,18 +1325,68 @@ async function deriveNbaFallbackLeaders(summary: any): Promise<DerivedLeadersPay
   return { leaders, byTeamKey };
 }
 
-async function deriveFallbackLeaders(summary: any, league: string): Promise<DerivedLeadersPayload> {
+async function deriveFallbackLeaders(summary: EspnSummary, league: string): Promise<DerivedLeadersPayload> {
   if (league === "MLB") {
     return deriveMlbFallbackLeaders(summary);
   }
   if (league === "NBA") {
     return deriveNbaFallbackLeaders(summary);
   }
+  if (league === "EPL" || league === "MLS") {
+    const trackedStats = [
+      { name: "possessionPct", label: "Possession", suffix: "%" },
+      { name: "totalShots", label: "Shots", suffix: "" },
+      { name: "shotsOnTarget", label: "On Goal", suffix: "" },
+      { name: "saves", label: "Saves", suffix: "" },
+    ] as const;
+    const leaders: Leader[] = [];
+    const byTeamKey: Record<string, DerivedTeamLeaders> = {};
+
+    for (const teamBox of asArray<EspnBoxscorePlayerTeam>(summary?.boxscore?.teams)) {
+      const teamInfo = teamBox?.team || {};
+      const teamLeaders: DerivedTeamLeaders = [];
+      const statMap = new Map<string, EspnStatistic>();
+      for (const stat of asArray<EspnStatistic>(teamBox?.statistics)) {
+        const name = cleanValue(stat?.name || "").toLowerCase();
+        if (name) statMap.set(name, stat);
+      }
+
+      for (const definition of trackedStats) {
+        const stat = statMap.get(definition.name.toLowerCase());
+        if (!stat) continue;
+        let value = cleanValue(String(stat.displayValue || stat.value || ""));
+        if (!value) continue;
+        if (definition.suffix && !value.includes(definition.suffix)) {
+          value = `${value}${definition.suffix}`;
+        }
+
+        const leader: Leader = {
+          team: String(teamInfo.displayName || ""),
+          teamAbbr: String(teamInfo.abbreviation || ""),
+          category: definition.label,
+          name: String(teamInfo.displayName || teamInfo.shortDisplayName || ""),
+          value,
+          headshot: teamInfo.logo || "",
+        };
+        leaders.push(leader);
+        teamLeaders.push({
+          category: definition.label,
+          name: leader.name,
+          value,
+          headshot: leader.headshot,
+        });
+      }
+
+      registerTeamLeaders(byTeamKey, teamInfo, teamLeaders);
+    }
+
+    return { leaders, byTeamKey };
+  }
   return { leaders: [], byTeamKey: {} };
 }
 
-function parseSummaryLeaders(summary: any): Leader[] {
-  const leaderGroups = summary?.leaders || [];
+function parseSummaryLeaders(summary: EspnSummary): Leader[] {
+  const leaderGroups = asArray<EspnSummaryLeaderGroup>(summary?.leaders);
   const leaders: Leader[] = [];
   for (const leaderGroup of leaderGroups) {
     const teamInfo = leaderGroup.team || {};
@@ -1184,15 +1407,15 @@ function parseSummaryLeaders(summary: any): Leader[] {
   return leaders;
 }
 
-function parseSummaryPlays(summary: any): Play[] {
-  const rawPlays = [...(summary?.plays || [])];
+function parseSummaryPlays(summary: EspnSummary): Play[] {
+  const rawPlays = [...asArray<EspnPlayRecord>(summary?.plays)];
   if (!rawPlays.length && summary?.drives) {
     for (const drive of summary.drives.previous || []) {
       rawPlays.push(...(drive?.plays || []));
     }
   }
 
-  return rawPlays.reverse().map((play: any) => {
+  return rawPlays.reverse().map((play) => {
     const clock = play.clock || {};
     const period = play.period || {};
     const participants = play.participants || [];
@@ -1223,124 +1446,60 @@ function parseSummaryPlays(summary: any): Play[] {
   });
 }
 
-async function fetchDirectGameDetail(eventId: string, league: string, dateParam: string): Promise<GameDetailResponse | null> {
-  const summaryPath = DIRECT_ESPN_SUMMARY_PATHS[league.toUpperCase()];
-  if (!summaryPath) return null;
-
-  const response = await fetch(`https://site.api.espn.com/apis/site/v2/sports/${summaryPath}/summary?event=${eventId}`, {
-    cache: "no-store",
-  });
-  if (!response.ok) return null;
-  const summary = await response.json();
-  const game = buildGameDataFromSummary(summary, league.toUpperCase(), eventId);
-  if (!game) return null;
-
-  const summaryDateParam =
-    normalizeActivityDateParam(dateParam) ||
-    normalizeActivityDateParam(String(summary?.header?.competitions?.[0]?.date || ""));
-
-  let plays: Play[] = [];
-  const candidateDates = Array.from(
-    new Set(
-      [
-        normalizeActivityDateParam(dateParam),
-        summaryDateParam,
-        shiftActivityDateParam(summaryDateParam, -1),
-        shiftActivityDateParam(summaryDateParam, 1),
-      ].filter(Boolean),
-    ),
-  );
-
-  for (const candidateDate of candidateDates) {
-    try {
-      const activityResp = await apiClient.get(API.ESPN_ACTIVITY, {
-        params: { league: league.toUpperCase(), date: candidateDate, limit: 20000 },
-      });
-      const rawActivities = Array.isArray(activityResp.data?.activities) ? activityResp.data.activities : [];
-      const matchingActivities = rawActivities.filter((item: any) => String(item?.gameId || "") === String(eventId));
-      if (matchingActivities.length) {
-        plays = matchingActivities;
-        break;
-      }
-    } catch {
-      /* Try the next candidate day if this one fails. */
-    }
-  }
-
-  if (!plays.length) {
-    plays = parseSummaryPlays(summary);
-  }
-
-  let leaders = parseSummaryLeaders(summary);
-  const derivedLeaders = await deriveFallbackLeaders(summary, league.toUpperCase());
-  leaders = mergeLeaders(leaders, derivedLeaders.leaders);
-  game.homeDetail = {
-    ...game.homeDetail,
-    leaders: mergeTeamLeaderItems(
-      game.homeDetail.leaders,
-      resolveDerivedTeamLeaders(game.homeDetail, derivedLeaders.byTeamKey),
-    ),
-  };
-  game.awayDetail = {
-    ...game.awayDetail,
-    leaders: mergeTeamLeaderItems(
-      game.awayDetail.leaders,
-      resolveDerivedTeamLeaders(game.awayDetail, derivedLeaders.byTeamKey),
-    ),
-  };
-
-  return {
-    game,
-    plays,
-    boxScore: parseSummaryBoxScore(summary),
-    leaders,
-  };
-}
+void DIRECT_ESPN_SUMMARY_PATHS;
+void shiftActivityDateParam;
+void buildGameDataFromSummary;
+void parseSummaryBoxScore;
+void resolveDerivedTeamLeaders;
+void mergeLeaders;
+void mergeTeamLeaderItems;
+void deriveFallbackLeaders;
+void parseSummaryLeaders;
+void parseSummaryPlays;
 
 export default function GameDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const leagueParam = cleanValue(searchParams.get("league")).toUpperCase();
-  const dateParam = normalizeActivityDateParam(searchParams.get("date"));
+  const eventId = useMemo(() => {
+    const cleanSlug = cleanValue(slug);
+    const match = cleanSlug.match(/(\d+)$/);
+    return match?.[1] || cleanSlug;
+  }, [slug]);
+  const leagueParam = useMemo(() => {
+    const cleanSlug = cleanValue(slug);
+    return cleanValue(cleanSlug.split("-")[0]).toUpperCase();
+  }, [slug]);
+  const dateParam = "";
   const [activeTab, setActiveTab] = useState<Tab>("plays");
   const [initializedGameId, setInitializedGameId] = useState("");
-  const gameKey = `${id || ""}:${leagueParam || ""}:${dateParam || ""}`;
+  const gameKey = `${eventId || ""}:${leagueParam || ""}:${dateParam || ""}`;
 
   const { data, isLoading } = useQuery<GameDetailResponse>({
-    queryKey: ["espn-game", id, leagueParam, dateParam],
+    queryKey: ["espn-game", eventId, leagueParam, dateParam],
     queryFn: async () => {
-      if (!id) {
+      if (!eventId) {
         return { game: null, plays: [], boxScore: [], leaders: [], error: "Game not found" };
-      }
-
-      let directData: GameDetailResponse | null = null;
-      if (leagueParam) {
-        try {
-          directData = await fetchDirectGameDetail(id, leagueParam, dateParam);
-          if (directData?.game) return directData;
-        } catch {
-          directData = null;
-        }
       }
 
       try {
         const params = leagueParam ? { league: leagueParam } : undefined;
-        const res = await apiClient.get(`${API.ESPN_GAME}/${id}`, { params });
+        const res = await apiClient.get(`${API.ESPN_GAME}/${eventId}`, { params });
         if (res.data?.game) return res.data;
       } catch {
-        /* Fall through to the direct ESPN summary fallback below. */
+        /* Fall through to the empty-state response below. */
       }
 
-      return directData ?? { game: null, plays: [], boxScore: [], leaders: [], error: "Game not found" };
+      return { game: null, plays: [], boxScore: [], leaders: [], error: "Game not found" };
     },
-    enabled: !!id,
+    enabled: !!eventId,
     placeholderData: (previousData) => previousData,
-    refetchInterval: 10000, // 10s for near-real-time
+    staleTime: 5000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => query.state.data?.game?.status === "live" ? LIVE_GAME_REFRESH_MS : false,
   });
 
   useEffect(() => {
-    if (!id || initializedGameId === gameKey) return;
+    if (!eventId || initializedGameId === gameKey) return;
     if (!data?.game) return;
 
     if (data.game.status === "upcoming") {
@@ -1356,7 +1515,7 @@ export default function GameDetailPage() {
     }
 
     setInitializedGameId(gameKey);
-  }, [id, gameKey, initializedGameId, data?.game, data?.plays.length, data?.boxScore.length, data?.leaders.length]);
+  }, [eventId, gameKey, initializedGameId, data?.game, data?.plays.length, data?.boxScore.length, data?.leaders.length]);
 
   if (isLoading) {
     return (
@@ -1435,6 +1594,11 @@ export default function GameDetailPage() {
   const isLive = game.status === "live";
   const home = game.homeDetail;
   const away = game.awayDetail;
+  const displayStatusDetail =
+    game.status === "upcoming" && isGenericUpcomingLabel(game.statusDetail)
+      ? formatScheduledLabel(game.scheduledAt) || game.statusDetail
+      : game.statusDetail;
+  const lineScoreColumnCount = Math.max(home.linescores?.length || 0, away.linescores?.length || 0);
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "plays", label: "Play-by-Play", icon: <IconPlayByPlay /> },
@@ -1449,24 +1613,19 @@ export default function GameDetailPage() {
 
       {/* ── Sticky Game Header ── */}
       <div className="sticky top-14 z-30 border-b border-muted/15" style={{
-        background: `linear-gradient(135deg, #${home.color || '1a1a2e'}22, #0B0E19 50%, #${away.color || '1a1a2e'}22)`,
+              background: `linear-gradient(135deg, #${home.color || '1a1a2e'}22, var(--background) 50%, #${away.color || '1a1a2e'}22)`,
         backdropFilter: 'blur(16px)',
       }}>
         <div className="max-w-4xl mx-auto px-4 py-4">
-          {/* League + Status bar */}
+          {/* Back + Status bar */}
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => navigate(-1)}
-                className="text-muted hover:text-foreground transition-colors mr-1"
-              >
-                <IconBack />
-              </button>
-              <span className="text-sm font-medium text-accent">{game.league}</span>
-              {game.broadcasts.length > 0 && (
-                <span className="text-xs text-muted hidden sm:inline">· {game.broadcasts.join(", ")}</span>
-              )}
-            </div>
+            <button
+              onClick={() => navigate(-1)}
+              className="inline-flex items-center gap-2 text-sm font-medium text-muted hover:text-foreground transition-colors"
+            >
+              <IconBack />
+              <span>Back</span>
+            </button>
             {isLive ? (
               <div className="flex items-center gap-2">
                 <LiveBadge />
@@ -1474,7 +1633,7 @@ export default function GameDetailPage() {
               </div>
             ) : (
               <span className="text-sm font-medium text-muted">
-                {game.status === "final" ? "FINAL" : game.statusDetail}
+                {game.status === "final" ? "FINAL" : displayStatusDetail}
               </span>
             )}
           </div>
@@ -1530,13 +1689,13 @@ export default function GameDetailPage() {
           </div>
 
           {/* ── Linescore ── */}
-          {(home.linescores?.length > 0 || away.linescores?.length > 0) && (
+          {lineScoreColumnCount > 0 && (
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-[11px] text-center">
                 <thead>
                   <tr className="text-muted">
                     <th className="text-left py-0.5 pr-3 font-medium w-10">Team</th>
-                    {(home.linescores || away.linescores || []).map((_, i) => (
+                    {Array.from({ length: lineScoreColumnCount }, (_, i) => (
                       <th key={i} className="px-1.5 py-0.5 font-medium min-w-[24px]">{i + 1}</th>
                     ))}
                     <th className="px-2 py-0.5 font-bold">T</th>
@@ -1545,15 +1704,15 @@ export default function GameDetailPage() {
                 <tbody className="text-foreground-base">
                   <tr>
                     <td className="text-left py-0.5 pr-3 font-medium text-foreground">{away.abbreviation}</td>
-                    {(away.linescores || []).map((s, i) => (
-                      <td key={i} className="px-1.5 py-0.5">{s}</td>
+                    {Array.from({ length: lineScoreColumnCount }, (_, i) => (
+                      <td key={i} className="px-1.5 py-0.5">{away.linescores?.[i] ?? "-"}</td>
                     ))}
                     <td className="px-2 py-0.5 font-bold text-foreground">{game.awayScore}</td>
                   </tr>
                   <tr>
                     <td className="text-left py-0.5 pr-3 font-medium text-foreground">{home.abbreviation}</td>
-                    {(home.linescores || []).map((s, i) => (
-                      <td key={i} className="px-1.5 py-0.5">{s}</td>
+                    {Array.from({ length: lineScoreColumnCount }, (_, i) => (
+                      <td key={i} className="px-1.5 py-0.5">{home.linescores?.[i] ?? "-"}</td>
                     ))}
                     <td className="px-2 py-0.5 font-bold text-foreground">{game.homeScore}</td>
                   </tr>
@@ -1589,7 +1748,7 @@ export default function GameDetailPage() {
           {activeTab === "plays" && <PlaysTab plays={data.plays} game={game} />}
           {activeTab === "boxscore" && <BoxScoreTab boxScore={data.boxScore} league={game.league} />}
           {activeTab === "leaders" && <LeadersTab leaders={data.leaders} homeDetail={home} awayDetail={away} league={game.league} />}
-          {activeTab === "info" && <InfoTab game={game} />}
+          {activeTab === "info" && <InfoTab game={game} displayStatusDetail={displayStatusDetail} />}
         </div>
       </main>
 
@@ -1613,71 +1772,249 @@ function hasScoreSnapshot(play: Play): boolean {
   return cleanValue(String(play.homeScore)) !== "" && cleanValue(String(play.awayScore)) !== "";
 }
 
-function PlayAvatarGroup({ play, game }: { play: Play; game: GameData }) {
-  const primaryName = cleanValue(play.athleteName);
-  const secondaryName = cleanValue(play.athlete2Name);
-  const primaryHeadshot = cleanValue(play.athleteHeadshot);
-  const secondaryHeadshot = cleanValue(play.athlete2Headshot);
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildResolvedTeams(game: GameData): ResolvedPlayTeam[] {
+  return [
+    {
+      name: cleanValue(game.homeTeam),
+      abbr: cleanValue(game.homeAbbr),
+      logo: cleanValue(game.homeBadge),
+      side: "home",
+    },
+    {
+      name: cleanValue(game.awayTeam),
+      abbr: cleanValue(game.awayAbbr),
+      logo: cleanValue(game.awayBadge),
+      side: "away",
+    },
+  ];
+}
+
+function matchesTeamReference(candidate: string, team: ResolvedPlayTeam): boolean {
+  const normalizedCandidate = cleanValue(candidate).toLowerCase();
+  if (!normalizedCandidate) return false;
+
+  const normalizedName = team.name.toLowerCase();
+  const normalizedAbbr = team.abbr.toLowerCase();
+
+  return (
+    (!!normalizedName &&
+      (normalizedCandidate === normalizedName ||
+        normalizedCandidate.includes(normalizedName) ||
+        normalizedName.includes(normalizedCandidate))) ||
+    (!!normalizedAbbr && normalizedCandidate === normalizedAbbr)
+  );
+}
+
+function textContainsTeamReference(text: string, team: ResolvedPlayTeam): boolean {
+  const normalizedText = normalizeText(text);
+  if (!normalizedText) return false;
+
+  const loweredText = normalizedText.toLowerCase();
+  if (team.name && loweredText.includes(team.name.toLowerCase())) {
+    return true;
+  }
+
+  if (team.abbr) {
+    const abbrPattern = new RegExp(`(^|[^A-Za-z0-9])${escapeRegex(team.abbr)}([^A-Za-z0-9]|$)`, "i");
+    if (abbrPattern.test(normalizedText)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function resolvePlayTeam(play: Play, game: GameData): ResolvedPlayTeam | null {
+  const teams = buildResolvedTeams(game);
+  const candidates = [play.playTeamName, play.playTeamAbbr, play.team];
+
+  for (const candidate of candidates) {
+    for (const team of teams) {
+      if (matchesTeamReference(candidate || "", team)) {
+        return team;
+      }
+    }
+  }
+
+  const combinedText = normalizeText(play.text || play.shortText || "");
+  for (const team of teams) {
+    if (textContainsTeamReference(combinedText, team)) {
+      return team;
+    }
+  }
+
+  return null;
+}
+
+function isPeriodBoundaryPlay(text: string, playType: string): boolean {
+  const normalized = `${normalizeText(text)} ${normalizeText(playType)}`.toLowerCase();
+  return (
+    normalized.includes("end game") ||
+    normalized.includes("game end") ||
+    normalized.includes("end of") ||
+    normalized.includes("end period") ||
+    normalized.includes("match ends") ||
+    normalized.includes("match end") ||
+    normalized.includes("first half ends") ||
+    normalized.includes("second half ends") ||
+    normalized.includes("first half begins") ||
+    normalized.includes("second half begins") ||
+    normalized.includes("game over") ||
+    normalized.includes("final:") ||
+    normalized.includes("middle of") ||
+    normalized.includes("top of the") ||
+    normalized.includes("bottom of the") ||
+    normalized.includes("inning") ||
+    normalized.includes("halftime") ||
+    normalized.includes("half begins") ||
+    normalized.includes("intermission") ||
+    normalized.includes("start of") ||
+    normalized.includes("beginning of")
+  );
+}
+
+function buildDisplayPlay(play: Play, game: GameData): DisplayPlay {
+  const resolvedTeam = resolvePlayTeam(play, game);
+  const resolvedTeamName = resolvedTeam?.name || cleanValue(play.playTeamName || play.team);
+  const resolvedTeamAbbr = resolvedTeam?.abbr || cleanValue(play.playTeamAbbr);
+  const resolvedTeamLogo = resolvedTeam?.logo || cleanValue(play.playTeamLogo || play.teamLogo);
+  const displayText = formatGenericPlayText(play.text || play.shortText || "", resolvedTeamAbbr || resolvedTeamName);
+  const playType = normalizeText(play.playType || play.type || "");
+  const parsedAthletes = parsePlayAthletes(displayText);
+  const inferredLeadAthleteRaw = extractLeadAthlete(displayText);
+  const inferredLeadAthlete = isUsableInferredAthleteName(inferredLeadAthleteRaw) ? inferredLeadAthleteRaw : "";
+  const normalizedAthleteName = cleanValue(play.athleteName) || parsedAthletes[0] || inferredLeadAthlete || "";
+  const normalizedAthlete2Name =
+    cleanValue(play.athlete2Name) ||
+    parsedAthletes.find((name) => name.toLowerCase() !== normalizedAthleteName.toLowerCase()) ||
+    "";
+
+  return {
+    ...play,
+    displayText,
+    playType,
+    playTeamName: resolvedTeamName,
+    playTeamAbbr: resolvedTeamAbbr,
+    playTeamLogo: resolvedTeamLogo,
+    athleteName: normalizedAthleteName,
+    athleteHeadshot: cleanValue(play.athleteHeadshot),
+    athleteStats: sanitizeRenderedStatLine(play.athleteStats),
+    athlete2Name: normalizedAthlete2Name,
+    athlete2Headshot: cleanValue(play.athlete2Headshot),
+    isMatchupEvent: isPeriodBoundaryPlay(displayText, playType),
+  };
+}
+
+function PlayAvatarGroup({ play, game }: { play: DisplayPlay; game: GameData }) {
+  const primaryName = play.athleteName;
+  const secondaryName = play.athlete2Name;
+  const primaryHeadshot = play.athleteHeadshot;
+  const secondaryHeadshot = play.athlete2Headshot;
   const teamLogo = cleanValue(play.playTeamLogo || play.teamLogo);
   const teamName = cleanValue(play.playTeamName || play.team);
-  const primaryFallbackLogo = teamLogo || cleanValue(game.awayBadge) || cleanValue(game.homeBadge);
+  const isPlayTeamHome = play.playTeamAbbr === cleanValue(game.homeAbbr);
+  const primaryFallbackLogo =
+    teamLogo ||
+    (isPlayTeamHome ? cleanValue(game.homeBadge) : cleanValue(game.awayBadge)) ||
+    cleanValue(game.awayBadge) ||
+    cleanValue(game.homeBadge);
   const secondaryFallbackLogo = teamLogo || primaryFallbackLogo;
+
+  if (play.isMatchupEvent) {
+    return (
+      <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
+        <div className="flex items-center -space-x-2">
+          <GameHeadshotImg
+            src={cleanValue(game.awayBadge)}
+            alt={game.awayAbbr || game.awayTeam}
+            className="surface-avatar-ring z-10 h-10 w-10 rounded-full"
+            fallbackSrc={cleanValue(game.homeBadge)}
+            renderMode="badge"
+          />
+          <GameHeadshotImg
+            src={cleanValue(game.homeBadge)}
+            alt={game.homeAbbr || game.homeTeam}
+            className="surface-avatar-ring h-10 w-10 rounded-full"
+            fallbackSrc={cleanValue(game.awayBadge)}
+            renderMode="badge"
+          />
+        </div>
+      </div>
+    );
+  }
 
   if ((primaryName || primaryHeadshot) && (secondaryName || secondaryHeadshot)) {
     return (
-      <div className="flex items-center -space-x-2.5 flex-shrink-0 mt-0.5">
-        <GameHeadshotImg
-          src={primaryHeadshot}
-          alt={primaryName}
-          league={game.league}
-          teamName={teamName}
-          fallbackSrc={primaryFallbackLogo}
-          className="w-10 h-10 rounded-full"
-        />
-        <GameHeadshotImg
-          src={secondaryHeadshot}
-          alt={secondaryName}
-          league={game.league}
-          teamName={teamName}
-          fallbackSrc={secondaryFallbackLogo}
-          className="w-10 h-10 rounded-full"
-        />
+      <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
+        <div className="flex items-center -space-x-2">
+          <GameHeadshotImg
+            src={primaryHeadshot}
+            alt={primaryName || teamName || "Player"}
+            league={game.league}
+            teamName={teamName}
+            fallbackSrc={primaryFallbackLogo}
+            className="surface-avatar-ring z-10 h-10 w-10 rounded-full"
+          />
+          <GameHeadshotImg
+            src={secondaryHeadshot}
+            alt={secondaryName || teamName || "Player"}
+            league={game.league}
+            teamName={teamName}
+            fallbackSrc={secondaryFallbackLogo}
+            className="surface-avatar-ring h-10 w-10 rounded-full"
+          />
+        </div>
       </div>
     );
   }
 
   if (primaryName || primaryHeadshot) {
     return (
-      <GameHeadshotImg
-        src={primaryHeadshot}
-        alt={primaryName}
-        league={game.league}
-        teamName={teamName}
-        fallbackSrc={primaryFallbackLogo}
-        className="w-10 h-10 rounded-full flex-shrink-0 mt-0.5"
-      />
+      <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
+        <GameHeadshotImg
+          src={primaryHeadshot}
+          alt={primaryName || teamName || "Player"}
+          league={game.league}
+          teamName={teamName}
+          fallbackSrc={primaryFallbackLogo}
+          className="surface-avatar-ring h-11 w-11 rounded-full"
+        />
+      </div>
     );
   }
 
   if (teamLogo) {
     return (
-      <GameHeadshotImg
-        src={teamLogo}
-        alt={teamName || game.homeAbbr || game.awayAbbr}
-        className="w-10 h-10 rounded-full flex-shrink-0 mt-0.5"
-        renderMode="badge"
-      />
+      <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
+        <GameHeadshotImg
+          src={teamLogo}
+          alt={play.playTeamAbbr || teamName || game.homeAbbr || game.awayAbbr}
+          className="surface-avatar-ring h-11 w-11 rounded-full"
+          renderMode="badge"
+        />
+      </div>
     );
   }
 
   return (
-    <div className="w-10 h-10 rounded-full border border-muted/15 bg-background/70 flex items-center justify-center flex-shrink-0 mt-0.5">
-      <IconClock />
+    <div className="flex h-[3.125rem] w-[4.375rem] items-center justify-center">
+      <div className="surface-avatar-image surface-avatar-ring flex h-11 w-11 items-center justify-center rounded-full">
+        <IconClock />
+      </div>
     </div>
   );
 }
 
 function PlaysTab({ plays, game }: { plays: Play[]; game: GameData }) {
+  const displayPlays = useMemo(
+    () => plays.map((play) => buildDisplayPlay(play, game)),
+    [plays, game],
+  );
+
   if (plays.length === 0) {
     return (
       <div className="bg-surface border border-muted/15 rounded-xl p-8 text-center">
@@ -1697,13 +2034,11 @@ function PlaysTab({ plays, game }: { plays: Play[]; game: GameData }) {
       <h3 className="text-foreground font-semibold mb-3 flex items-center gap-2">
         <IconPlayByPlay /> Play-by-Play
         {game.status === "live" && (
-          <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full animate-pulse font-bold">LIVE</span>
+          <span className="surface-live-badge rounded-full px-2 py-0.5 text-[10px] animate-pulse font-bold">LIVE</span>
         )}
       </h3>
-      {plays.map((play, idx) => {
+      {displayPlays.map((play, idx) => {
         const playMeta = formatPlayMeta(play);
-        const playTeamName = cleanValue(play.playTeamName || play.team);
-                  const playStats = sanitizeRenderedStatLine(play.athleteStats);
         const scoreVisible = hasScoreSnapshot(play);
         return (
           <div
@@ -1714,34 +2049,48 @@ function PlaysTab({ plays, game }: { plays: Play[]; game: GameData }) {
                 : "bg-surface border border-muted/8 hover:border-muted/15"
             }`}
           >
-            <div className="flex items-start gap-3">
-              <PlayAvatarGroup play={play} game={game} />
+            <div className="grid grid-cols-[4.375rem_minmax(0,1fr)_4.5rem] gap-2.5 items-start">
+              <div className="pt-0.5">
+                <PlayAvatarGroup play={play} game={game} />
+              </div>
 
-              <div className="flex-1 min-w-0">
-                {playTeamName && (
-                  <p className="text-xs text-muted font-medium mb-0.5">{playTeamName}</p>
+              <div className="min-w-0 pt-0.5 pr-2">
+                {!play.isMatchupEvent && play.playTeamName && (
+                  <p className="text-[10px] text-muted/60 font-medium leading-tight mb-0.5 truncate">
+                    {play.playTeamName}
+                  </p>
                 )}
-                <p className={`text-sm leading-snug ${play.scoringPlay ? "text-foreground font-medium" : "text-foreground-base"}`}>
-                  {cleanValue(play.text || play.shortText)}
+                <p className={`text-[12px] leading-snug break-words ${play.scoringPlay ? "text-foreground font-medium" : "text-foreground-base"}`}>
+                  {play.displayText}
                 </p>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                   {playMeta && (
-                    <span className="text-[11px] text-muted font-mono">{playMeta}</span>
+                    <span className="text-[10px] text-muted font-mono">{playMeta}</span>
                   )}
-                  {playStats && (
-                    <span className="text-[11px] text-accent font-medium">{playStats}</span>
+                  {play.athleteStats && (
+                    <span className="text-[10px] text-accent font-medium">{play.athleteStats}</span>
                   )}
                 </div>
               </div>
 
-              {scoreVisible && (
-                <div className="flex-shrink-0 text-right pl-3">
-                  <div className="text-[11px] text-muted font-medium">{game.awayAbbr}</div>
-                  <div className="text-sm font-bold tabular-nums text-foreground">{play.awayScore}</div>
-                  <div className="mt-1 text-[11px] text-muted font-medium">{game.homeAbbr}</div>
-                  <div className="text-sm font-bold tabular-nums text-foreground">{play.homeScore}</div>
-                </div>
-              )}
+              <div className="pt-0.5 text-right">
+                {scoreVisible && (
+                  <>
+                    <div className="flex items-center justify-end gap-1.5 text-[10px] leading-tight">
+                      <span className="text-muted font-medium">{game.awayAbbr}</span>
+                      <span className="font-bold tabular-nums min-w-[14px] text-right text-foreground">
+                        {play.awayScore}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5 text-[10px] leading-tight mt-0.5">
+                      <span className="text-muted font-medium">{game.homeAbbr}</span>
+                      <span className="font-bold tabular-nums min-w-[14px] text-right text-foreground">
+                        {play.homeScore}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -1751,8 +2100,55 @@ function PlaysTab({ plays, game }: { plays: Play[]; game: GameData }) {
 }
 
 /* ── Box Score Tab ── */
+const BOX_SCORE_LABEL_PREFERENCES: Record<string, string[]> = {
+  NBA: ["MIN", "PTS", "FG", "3PT", "FT", "REB", "AST", "TO", "STL", "BLK", "OREB", "DREB", "PF", "+/-"],
+  NFL: ["C/ATT", "YDS", "AVG", "TD", "INT", "SACKS", "QBR", "RTG", "CAR", "REC", "TGTS", "LONG"],
+  MLB: ["H-AB", "AB", "R", "H", "RBI", "HR", "BB", "K", "#P", "AVG", "OBP", "SLG", "IP", "ER", "WHIP"],
+  NHL: ["G", "A", "PTS", "SOG", "TOI", "+/-", "FW", "FL", "FO%", "PIM", "HT", "TK", "BS"],
+  EPL: ["Possession", "SHOTS", "ON GOAL", "Saves", "Fouls", "Corner Kicks", "Accurate Passes", "Passes", "Pass Completion %"],
+  MLS: ["Possession", "SHOTS", "ON GOAL", "Saves", "Fouls", "Corner Kicks", "Accurate Passes", "Passes", "Pass Completion %"],
+};
+
+function buildStableBoxScoreLabels(boxScore: BoxScoreTeam[], league: string): string[] {
+  const discoveredLabels: string[] = [];
+  const addLabel = (label: string) => {
+    const cleaned = cleanValue(label);
+    if (cleaned && !discoveredLabels.includes(cleaned)) {
+      discoveredLabels.push(cleaned);
+    }
+  };
+
+  for (const team of boxScore) {
+    for (const label of team.labels || []) {
+      addLabel(label);
+    }
+    for (const player of team.players || []) {
+      for (const label of Object.keys(player.stats || {})) {
+        addLabel(label);
+      }
+    }
+  }
+
+  const orderedLabels: string[] = [];
+  const preferred = BOX_SCORE_LABEL_PREFERENCES[cleanValue(league).toUpperCase()] || [];
+  for (const preferredLabel of preferred) {
+    if (discoveredLabels.includes(preferredLabel) && !orderedLabels.includes(preferredLabel)) {
+      orderedLabels.push(preferredLabel);
+    }
+  }
+
+  for (const label of discoveredLabels) {
+    if (!orderedLabels.includes(label)) {
+      orderedLabels.push(label);
+    }
+  }
+
+  return orderedLabels;
+}
+
 function BoxScoreTab({ boxScore, league }: { boxScore: BoxScoreTeam[]; league: string }) {
   const [expandedTeam, setExpandedTeam] = useState<number>(0);
+  const displayLabels = useMemo(() => buildStableBoxScoreLabels(boxScore, league), [boxScore, league]);
 
   if (boxScore.length === 0) {
     return (
@@ -1766,41 +2162,50 @@ function BoxScoreTab({ boxScore, league }: { boxScore: BoxScoreTeam[]; league: s
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
-        {boxScore.map((team, i) => (
-          <button
-            key={team.teamAbbr}
-            onClick={() => setExpandedTeam(i)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              expandedTeam === i
-                ? "bg-accent text-white"
-                : "bg-surface border border-muted/20 text-muted hover:text-foreground"
-            }`}
-          >
-            {team.teamLogo && (
-              <GameHeadshotImg
-                src={team.teamLogo}
-                alt={team.teamAbbr || team.teamName}
-                className="w-5 h-5 rounded-full flex-shrink-0"
-                renderMode="badge"
-              />
-            )}
-            {team.teamName}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-foreground font-semibold text-lg">Box Score</h3>
+        <div className="ml-auto flex flex-wrap justify-end gap-2">
+          {boxScore.map((team, i) => (
+            <button
+              key={team.teamAbbr}
+              onClick={() => setExpandedTeam(i)}
+              className={`flex items-center justify-between gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-colors min-w-[11rem] ${
+                expandedTeam === i
+                  ? "bg-accent text-white"
+                  : "bg-surface border border-muted/20 text-muted hover:text-foreground"
+              }`}
+            >
+              <span className="truncate">{team.teamName}</span>
+              {team.teamLogo && (
+                <GameHeadshotImg
+                  src={team.teamLogo}
+                  alt={team.teamAbbr || team.teamName}
+                  className="w-5 h-5 rounded-full flex-shrink-0"
+                  renderMode="badge"
+                />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {boxScore[expandedTeam] && (
         <div className="bg-surface border border-muted/15 rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+          <div className="overflow-x-auto overflow-y-hidden scrollbar-hide">
+            <table className="min-w-full w-max table-fixed text-xs">
+              <colgroup>
+                <col className="w-[220px]" />
+                {displayLabels.map((label) => (
+                  <col key={label} className="w-[72px]" />
+                ))}
+              </colgroup>
               <thead>
                 <tr className="bg-background/50">
-                  <th className="text-left py-2 px-3 text-muted font-medium sticky left-0 bg-background/95 z-10 min-w-[130px]">
+                  <th className="text-left py-2 px-3 text-muted font-medium sticky left-0 bg-background/95 z-10 min-w-[220px]">
                     Player
                   </th>
-                  {boxScore[expandedTeam].labels.slice(0, 10).map((label) => (
-                    <th key={label} className="py-2 px-2 text-muted font-medium text-center min-w-[36px]">
+                  {displayLabels.map((label) => (
+                    <th key={label} className="py-2 px-2 text-muted font-medium text-center min-w-[72px]">
                       {label}
                     </th>
                   ))}
@@ -1810,7 +2215,7 @@ function BoxScoreTab({ boxScore, league }: { boxScore: BoxScoreTeam[]; league: s
                 {boxScore[expandedTeam].players.map((player, i) => {
                   const hsUrl = getHeadshotUrl(player.headshot);
                   return (
-                    <tr key={i} className="hover:bg-background/30 transition-colors box-row-enter" style={{ animationDelay: `${i * 30}ms` }}>
+                    <tr key={i} className="hover:bg-background/30 transition-colors">
                       <td className="py-1.5 px-3 sticky left-0 bg-surface z-10">
                         <div className="flex items-center gap-2">
                           <GameHeadshotImg
@@ -1830,7 +2235,7 @@ function BoxScoreTab({ boxScore, league }: { boxScore: BoxScoreTeam[]; league: s
                           </div>
                         </div>
                       </td>
-                      {boxScore[expandedTeam].labels.slice(0, 10).map((label) => (
+                      {displayLabels.map((label) => (
                         <td key={label} className="py-1.5 px-2 text-center text-foreground-base text-xs tabular-nums">
                           {player.stats[label] || "-"}
                         </td>
@@ -1891,6 +2296,38 @@ function LeadersTab({ leaders, homeDetail, awayDetail, league }: { leaders: Lead
       .split("|")
       .map((segment) => cleanValue(segment))
       .filter(Boolean);
+  const matchesLeaderTeam = (player: Leader, teamDetail: TeamDetail) => {
+    const leaderAbbr = cleanValue(player.teamAbbr).toUpperCase();
+    const leaderTeam = cleanValue(player.team).toLowerCase();
+    const teamAbbr = cleanValue(teamDetail.abbreviation).toUpperCase();
+    const teamName = cleanValue(teamDetail.name).toLowerCase();
+    return (leaderAbbr && leaderAbbr === teamAbbr) || (leaderTeam && leaderTeam === teamName);
+  };
+  const buildOrderedCategorySlots = (players: Leader[]) => {
+    const remainingPlayers = [...players];
+    const takeTeamLeader = (teamDetail: TeamDetail) => {
+      const index = remainingPlayers.findIndex((player) => matchesLeaderTeam(player, teamDetail));
+      return index >= 0 ? remainingPlayers.splice(index, 1)[0] : null;
+    };
+
+    // The sticky game header renders away on the left and home on the right,
+    // so keep the leaders grid in that same visual order.
+    const awayPlayer = takeTeamLeader(awayDetail);
+    const homePlayer = takeTeamLeader(homeDetail);
+    return [
+      { key: `away-${categoryKey(players)}`, player: awayPlayer, isPlaceholder: !awayPlayer },
+      { key: `home-${categoryKey(players)}`, player: homePlayer, isPlaceholder: !homePlayer },
+      ...remainingPlayers.map((player, index) => ({
+        key: `${cleanValue(player.category)}-${cleanValue(player.teamAbbr || player.team)}-${index}`,
+        player,
+        isPlaceholder: false,
+      })),
+    ];
+  };
+
+  function categoryKey(players: Leader[]): string {
+    return cleanValue(players[0]?.category || "leader");
+  }
 
   return (
     <div className="space-y-4">
@@ -1901,13 +2338,19 @@ function LeadersTab({ leaders, homeDetail, awayDetail, league }: { leaders: Lead
         <div key={category} className="bg-surface border border-muted/15 rounded-2xl p-4 sm:p-5">
           <h4 className="text-xs text-accent font-medium mb-4 uppercase tracking-[0.18em]">{category}</h4>
           <div className="grid gap-3 md:grid-cols-2">
-            {players.map((player, i) => {
+            {buildOrderedCategorySlots(players).map((slot) => {
+              if (!slot.player) {
+                return <div key={slot.key} className="hidden min-h-[1px] md:block" aria-hidden="true" />;
+              }
+
+              const player = slot.player;
               const hsUrl = getHeadshotUrl(player.headshot);
               const statSegments = splitLeaderValue(player.value);
+              const renderTeamBadge = cleanValue(player.name).toLowerCase() === cleanValue(player.team).toLowerCase();
               return (
                 <div
-                  key={i}
-                  className="rounded-xl border border-muted/10 bg-background/45 p-4 shadow-[0_0_0_1px_rgba(80,120,255,0.04)] flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
+                  key={slot.key}
+                  className="rounded-xl border border-muted/10 bg-background/45 p-4 shadow-[0_0_0_1px_var(--surface-outline-soft)] flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="flex items-center gap-3 min-w-0 sm:flex-1">
                     <GameHeadshotImg
@@ -1916,6 +2359,7 @@ function LeadersTab({ leaders, homeDetail, awayDetail, league }: { leaders: Lead
                       league={league}
                       teamName={player.team}
                       className="w-12 h-12 rounded-full flex-shrink-0"
+                      renderMode={renderTeamBadge ? "badge" : "headshot"}
                     />
                     <div className="min-w-0 flex-1">
                       <p className="text-foreground font-semibold text-lg leading-tight truncate">{player.name}</p>
@@ -1954,7 +2398,7 @@ function LeadersTab({ leaders, homeDetail, awayDetail, league }: { leaders: Lead
 }
 
 /* ── Game Info Tab ── */
-function InfoTab({ game }: { game: GameData }) {
+function InfoTab({ game, displayStatusDetail }: { game: GameData; displayStatusDetail: string }) {
   return (
     <div className="space-y-4">
       <div className="bg-surface border border-muted/15 rounded-xl p-5">
@@ -1965,7 +2409,7 @@ function InfoTab({ game }: { game: GameData }) {
           <InfoRow label="Stadium" value={game.venue.name} />
           <InfoRow label="Location" value={[game.venue.city, game.venue.state].filter(Boolean).join(", ")} />
           <InfoRow label="Date" value={new Date(game.dateEvent + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })} />
-          <InfoRow label="Status" value={game.statusDetail} />
+          <InfoRow label="Status" value={displayStatusDetail} />
         </div>
       </div>
 

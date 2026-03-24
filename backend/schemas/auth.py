@@ -9,6 +9,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from services.profile_validation import validate_display_handle, validate_person_name
+
 
 def _parse_flexible_date(v: object) -> date:
     """Parse date from multiple formats: YYYY-MM-DD, MM/DD/YYYY, MMDDYYYY, etc."""
@@ -68,6 +70,21 @@ class RegisterRequest(BaseModel):
     def parse_dob(cls, v: object) -> date:
         return _parse_flexible_date(v)
 
+    @field_validator("first_name")
+    @classmethod
+    def validate_first_name(cls, v: str) -> str:
+        return validate_person_name(v, "First name")
+
+    @field_validator("last_name")
+    @classmethod
+    def validate_last_name(cls, v: str) -> str:
+        return validate_person_name(v, "Last name")
+
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: str) -> str:
+        return validate_display_handle(v)
+
 
 
 
@@ -117,6 +134,11 @@ class OnboardingStep1Request(BaseModel):
     def parse_dob(cls, v: object) -> date:
         return _parse_flexible_date(v)
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, v: str) -> str:
+        return validate_display_handle(v)
+
 
 class OnboardingStep2Request(BaseModel):
     sports: list[str] = Field(default_factory=list)
@@ -146,6 +168,23 @@ class PasswordResetRequest(BaseModel):
         if "@" not in v:
             raise ValueError("Must be a valid email address")
         return v.strip().lower()
+
+
+class PasswordResetTokenRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+
+    @field_validator("token")
+    @classmethod
+    def token_must_exist(cls, v: str) -> str:
+        normalized = v.strip()
+        if not normalized:
+            raise ValueError("Reset token is required")
+        return normalized
+
+
+class PasswordResetConfirmRequest(PasswordResetTokenRequest):
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
 
 
 class TokenRefreshResponse(BaseModel):

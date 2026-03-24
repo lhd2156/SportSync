@@ -6,9 +6,9 @@
  */
 import { memo } from "react";
 
-interface AgeGateProps {
+type AgeGateProps = {
   dateOfBirth: string;
-}
+};
 
 function calculateAge(dob: string): number {
   const birth = new Date(dob);
@@ -28,11 +28,11 @@ function AgeGate({ dateOfBirth }: AgeGateProps) {
   if (age >= 18) return null;
 
   return (
-    <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-      <p className="text-red-400 text-sm font-medium">
+    <div className="surface-error-card rounded-lg px-4 py-3">
+      <p className="surface-status-negative text-sm font-medium">
         You must be 18 or older to use SportSync.
       </p>
-      <p className="text-red-400/70 text-xs mt-0.5">
+      <p className="surface-status-negative text-xs mt-0.5 opacity-75">
         Based on the date entered, you are {age} years old.
       </p>
     </div>

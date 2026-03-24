@@ -10,10 +10,10 @@ import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 
-interface ProtectedRouteProps {
+type ProtectedRouteProps = {
   children: React.ReactNode;
   requireOnboarding?: boolean;
-}
+};
 
 export default function ProtectedRoute({
   children,

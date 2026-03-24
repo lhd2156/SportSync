@@ -6,6 +6,7 @@ based on the user's saved teams and selected sports.
 """
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from typing import Any
 
 from database import get_db
 from dependencies import get_current_user
@@ -15,7 +16,7 @@ from services.feed_service import build_personalized_feed
 router = APIRouter(prefix="/api/user", tags=["feed"])
 
 
-@router.get("/feed")
+@router.get("/feed", response_model=dict[str, Any])
 async def get_feed(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

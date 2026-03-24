@@ -8,11 +8,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from config import settings
+from config import BACKEND_DIR, settings
 from constants import APP_TITLE, APP_VERSION, APP_DESCRIPTION
-from database import engine, Base
+from database import engine, Base, SessionLocal
+from models.game import Game
+from models.team import Team
 from routers import auth, user, teams, scores, games, predictions, feed, sports
+from services.team_seed_service import seed_reference_teams
 
 # Import all models so tables are registered with SQLAlchemy
 import models.user  # noqa: F401
@@ -23,8 +27,11 @@ import models.prediction  # noqa: F401
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create database tables on startup and auto-retrain ML model if needed."""
-    Base.metadata.create_all(bind=engine)
+    """Run startup tasks and optional local-only schema bootstrap."""
+    if settings.database_auto_create:
+        Base.metadata.create_all(bind=engine)
+
+    _seed_reference_teams_if_needed()
 
     # Auto-retrain the ML model in background (don't block server startup)
     try:
@@ -43,14 +50,12 @@ def _auto_retrain_if_needed():
     import logging
     import time
     from pathlib import Path
-    from sqlalchemy import text
     from database import SessionLocal
 
     logger = logging.getLogger(__name__)
     db = SessionLocal()
     try:
-        result = db.execute(text("SELECT COUNT(*) FROM games WHERE status='final'")).scalar()
-        db_final_count = int(result or 0)
+        db_final_count = db.query(Game).filter(Game.status == "final").count()
         if db_final_count < 50:
             logger.info("Only %d final games in DB, skipping auto-retrain.", db_final_count)
             return
@@ -79,12 +84,40 @@ def _auto_retrain_if_needed():
         db.close()
 
 
+def _seed_reference_teams_if_needed() -> None:
+    """Populate the teams table on fresh environments before serving requests."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        existing_teams = db.query(Team).count()
+        if existing_teams > 0:
+            logger.info("Reference teams already present (%d rows).", existing_teams)
+            return
+
+        summary = seed_reference_teams(db)
+        logger.info(
+            "Seeded reference teams on startup (created=%d updated=%d).",
+            summary.get("created", 0),
+            summary.get("updated", 0),
+        )
+    except Exception as exc:
+        logger.warning("Reference team seed skipped: %s", exc)
+    finally:
+        db.close()
+
+
 app = FastAPI(
     title=APP_TITLE,
     version=APP_VERSION,
     description=APP_DESCRIPTION,
     lifespan=lifespan,
 )
+
+uploads_dir = (BACKEND_DIR / "uploads").resolve()
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # CORS configured to allow only specific origins, never wildcard
 app.add_middleware(
@@ -110,4 +143,3 @@ app.include_router(sports.router)
 async def health_check():
     """Minimal health endpoint for load balancer and Docker checks."""
     return {"status": "healthy", "version": APP_VERSION}
-

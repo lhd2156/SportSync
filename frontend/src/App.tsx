@@ -10,6 +10,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { CookieProvider } from "./context/CookieContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import CookieBanner from "./components/CookieBanner";
+import ScrollToTop from "./components/ScrollToTop";
 import { ROUTES } from "./constants";
 
 /* React Query client */
@@ -27,10 +28,13 @@ const queryClient = new QueryClient({
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import OnboardingStep1 from "./pages/OnboardingStep1";
 import OnboardingStep2 from "./pages/OnboardingStep2";
 import OnboardingStep3 from "./pages/OnboardingStep3";
 import DashboardPage from "./pages/DashboardPage";
+import HighlightsPage from "./pages/HighlightsPage";
 import Teams from "./pages/Teams";
 import GameDetailPage from "./pages/GameDetailPage";
 import TeamDetail from "./pages/TeamDetail";
@@ -47,11 +51,14 @@ export default function App() {
       <AuthProvider>
         <CookieProvider>
           <BrowserRouter>
+            <ScrollToTop />
             <Routes>
               {/* Public routes */}
               <Route path={ROUTES.HOME} element={<LandingPage />} />
               <Route path={ROUTES.LOGIN} element={<LoginPage />} />
               <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
+              <Route path={ROUTES.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
+              <Route path={ROUTES.RESET_PASSWORD} element={<ResetPasswordPage />} />
               <Route path={ROUTES.TERMS} element={<TermsPage />} />
               <Route path={ROUTES.PRIVACY} element={<PrivacyPage />} />
               <Route path={ROUTES.COOKIES} element={<CookiePolicyPage />} />
@@ -73,6 +80,7 @@ export default function App() {
 
               {/* Protected -- auth + onboarding required */}
               <Route path={ROUTES.DASHBOARD} element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+              <Route path={ROUTES.HIGHLIGHTS} element={<ProtectedRoute><HighlightsPage /></ProtectedRoute>} />
               <Route path={ROUTES.SCORES} element={<Navigate to={ROUTES.DASHBOARD} replace />} />
               <Route path={ROUTES.STANDINGS} element={<ProtectedRoute><StandingsPage /></ProtectedRoute>} />
               <Route path={ROUTES.TEAMS} element={<ProtectedRoute><Teams /></ProtectedRoute>} />

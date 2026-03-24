@@ -12,8 +12,19 @@ import { ROUTES } from "../constants";
 import Logo from "../components/Logo";
 import AgeGate, { calculateAge } from "../components/AgeGate";
 import Footer from "../components/Footer";
-import GoogleSignInButton from "../components/GoogleSignInButton";
+import GoogleSignInButton, { GOOGLE_SIGN_IN_AVAILABLE } from "../components/GoogleSignInButton";
 import { parseDobInput, formatDobDisplay, autoFormatDobText } from "../utils/dob";
+
+const NAME_PATTERN = /^[A-Za-z]+$/;
+const DISPLAY_HANDLE_PATTERN = /^[A-Za-z0-9_]+$/;
+
+function sanitizeNameInput(value: string): string {
+  return value.replace(/[^A-Za-z]/g, "");
+}
+
+function sanitizeDisplayHandleInput(value: string): string {
+  return value.replace(/[^A-Za-z0-9_]/g, "");
+}
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -46,6 +57,12 @@ export default function RegisterPage() {
     if (!firstName.trim()) return "First name is required.";
     if (!lastName.trim()) return "Last name is required.";
     if (!displayName.trim()) return "Display name is required.";
+    if (!NAME_PATTERN.test(firstName.trim()) || !NAME_PATTERN.test(lastName.trim())) {
+      return "First and last name can only contain letters.";
+    }
+    if (!DISPLAY_HANDLE_PATTERN.test(displayName.trim())) {
+      return "Display name can only use letters, numbers, and underscores.";
+    }
     if (!dateOfBirth) return "Date of birth is required.";
     if (isUnderage) return "You must be 18 or older.";
     if (!strong) return "Password does not meet all requirements.";
@@ -61,7 +78,7 @@ export default function RegisterPage() {
     setIsSubmitting(true);
     try {
       const fullDisplayName = displayName.trim();
-      await register(email, password, confirmPassword, firstName, lastName, fullDisplayName, dateOfBirth, gender || null);
+      await register(email, password, confirmPassword, firstName.trim(), lastName.trim(), fullDisplayName, dateOfBirth, gender || null);
       navigate(ROUTES.ONBOARDING_STEP_2);
     } catch (err: unknown) {
       const apiError = err as { response?: { data?: { detail?: string } } };
@@ -88,7 +105,7 @@ export default function RegisterPage() {
           <div className="bg-surface border border-muted/15 rounded-2xl p-6 shadow-lg shadow-black/20">
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg px-4 py-3">
+          <div className="surface-error-card text-sm rounded-lg px-4 py-3">
                   {error}
                 </div>
               )}
@@ -97,24 +114,24 @@ export default function RegisterPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="reg-first" className="block text-sm text-muted mb-1">First Name</label>
-                  <input id="reg-first" type="text" required value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} placeholder="First" />
+                  <input id="reg-first" type="text" required value={firstName} onChange={(e) => setFirstName(sanitizeNameInput(e.target.value))} className={inputCls} placeholder="First" autoComplete="given-name" />
                 </div>
                 <div>
                   <label htmlFor="reg-last" className="block text-sm text-muted mb-1">Last Name</label>
-                  <input id="reg-last" type="text" required value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} placeholder="Last" />
+                  <input id="reg-last" type="text" required value={lastName} onChange={(e) => setLastName(sanitizeNameInput(e.target.value))} className={inputCls} placeholder="Last" autoComplete="family-name" />
                 </div>
               </div>
 
               {/* Display Name */}
               <div>
                 <label htmlFor="reg-display" className="block text-sm text-muted mb-1">Display Name</label>
-                <input id="reg-display" type="text" required value={displayName} onChange={(e) => setDisplayName(e.target.value)} className={inputCls} placeholder="Your username" />
+                <input id="reg-display" type="text" required value={displayName} onChange={(e) => setDisplayName(sanitizeDisplayHandleInput(e.target.value))} className={inputCls} placeholder="Your username" autoComplete="nickname" />
               </div>
 
               {/* Email */}
               <div>
                 <label htmlFor="reg-email" className="block text-sm text-muted mb-1">Email</label>
-                <input id="reg-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="you@example.com" />
+                <input id="reg-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="you@example.com" autoComplete="email" />
               </div>
 
               {/* DOB + Gender — side by side */}
@@ -139,6 +156,7 @@ export default function RegisterPage() {
                       }}
                       className={inputCls + " pr-10"}
                       placeholder="MM/DD/YYYY"
+                      autoComplete="bday"
                     />
                     <div className="absolute right-0 top-0 h-full flex items-center pr-2">
                       <input
@@ -175,12 +193,12 @@ export default function RegisterPage() {
               {/* Password */}
               <div>
                 <label htmlFor="reg-pw" className="block text-sm text-muted mb-1">Password</label>
-                <input id="reg-pw" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="Create a strong password" />
+                <input id="reg-pw" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} placeholder="Create a strong password" autoComplete="new-password" />
                 {password.length > 0 && (
                   <div className="mt-2">
                     <div className="flex gap-1 mb-1.5">
                       {[0, 1, 2, 3].map((i) => (
-                        <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < passedCount ? (passedCount <= 2 ? "bg-amber-400" : "bg-green-400") : "bg-muted/15"}`} />
+          <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${i < passedCount ? (passedCount <= 2 ? "bg-[color:var(--warning)]" : "bg-[color:var(--success)]") : "bg-muted/15"}`} />
                       ))}
                     </div>
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
@@ -196,9 +214,9 @@ export default function RegisterPage() {
               {/* Confirm Password */}
               <div>
                 <label htmlFor="reg-cpw" className="block text-sm text-muted mb-1">Confirm Password</label>
-                <input id="reg-cpw" type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} placeholder="Confirm your password" />
+                <input id="reg-cpw" type="password" required value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className={inputCls} placeholder="Confirm your password" autoComplete="new-password" />
                 {confirmPassword.length > 0 && password !== confirmPassword && (
-                  <p className="text-red-400 text-xs mt-1">Passwords do not match</p>
+                  <p className="surface-status-negative text-xs mt-1">Passwords do not match</p>
                 )}
               </div>
 
@@ -211,15 +229,17 @@ export default function RegisterPage() {
                 {isSubmitting ? "Creating account..." : "Create Account"}
               </button>
 
-              {/* Divider */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px bg-muted/15" />
-                <span className="text-muted/40 text-xs">or</span>
-                <div className="flex-1 h-px bg-muted/15" />
-              </div>
+              {GOOGLE_SIGN_IN_AVAILABLE ? (
+                <>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-muted/15" />
+                    <span className="text-muted/40 text-xs">or</span>
+                    <div className="flex-1 h-px bg-muted/15" />
+                  </div>
 
-              {/* Google */}
-              <GoogleSignInButton text="continue_with" />
+                  <GoogleSignInButton text="continue_with" />
+                </>
+              ) : null}
             </form>
           </div>
 
@@ -247,8 +267,8 @@ export default function RegisterPage() {
 
 function Rule({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <span className={`transition-colors ${ok ? "text-green-400" : "text-muted/40"}`}>
-      <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle ${ok ? "bg-green-400" : "bg-muted/30"}`} />
+                        <span className={`transition-colors ${ok ? "surface-status-positive" : "text-muted/40"}`}>
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle ${ok ? "bg-[color:var(--success)]" : "bg-muted/30"}`} />
       {children}
     </span>
   );

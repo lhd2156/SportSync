@@ -9,29 +9,11 @@ import { useNavigate } from "react-router-dom";
 import apiClient from "../api/client";
 import { API, ROUTES } from "../constants";
 import { useAuth } from "../context/AuthContext";
+import type { LeagueKey, TeamGroup, TeamGroupsResponse, TeamItem, TeamCatalogResponse } from "../types";
 
 const LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
-type LeagueKey = (typeof LEAGUE_ORDER)[number];
 
-interface TeamItem {
-  id: string;
-  name: string;
-  shortName: string;
-  league: LeagueKey;
-  logo: string;
-}
-
-interface TeamGroup {
-  name: string;
-  teams: string[];
-  teamIds: string[];
-}
-
-interface TeamGroupsResponse {
-  groups?: TeamGroup[];
-}
-
-interface TeamFilterPanelProps {
+type TeamFilterPanelProps = {
   title: string;
   groups: TeamGroup[];
   selectedGroups: string[];
@@ -40,7 +22,7 @@ interface TeamFilterPanelProps {
   layout?: "stack" | "grid";
   onClearAll: () => void;
   onToggleGroup: (groupName: string) => void;
-}
+};
 
 function SearchIcon() {
   return (
@@ -182,7 +164,7 @@ function TeamFilterPanel({
                 onClick={() => onToggleGroup(group.name)}
                 className={`rounded-xl border px-3 py-2 text-left text-sm transition-all ${
                   isActive
-                    ? "border-accent bg-accent text-white shadow-[0_0_0_1px_rgba(46,142,255,0.16)]"
+                    ? "border-accent bg-accent text-white surface-accent-choice"
                     : "border-muted/15 bg-background/40 text-muted hover:border-muted/30 hover:text-foreground"
                 }`}
               >
@@ -223,8 +205,9 @@ export default function OnboardingStep3() {
         params: { page: 1, page_size: 500 },
       });
 
-      const allTeams: TeamItem[] = (response.data || []).map((team: any) => ({
+      const allTeams: TeamItem[] = (Array.isArray(response.data) ? response.data : []).map((team: TeamCatalogResponse) => ({
         id: team.id,
+        requestId: team.external_id || team.id,
         name: team.name,
         shortName: team.short_name || team.name.slice(0, 3).toUpperCase(),
         league: team.league as LeagueKey,
@@ -541,7 +524,7 @@ export default function OnboardingStep3() {
 
           <div className="mx-auto w-full max-w-[920px]">
             {teamsError && !isLoading && (
-              <div className="mb-4 flex items-center justify-between gap-3 rounded-2xl border border-amber-400/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              <div className="surface-note-warning mb-4 flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm">
                 <p>{teamsError}</p>
                 <button
                   type="button"
@@ -572,7 +555,7 @@ export default function OnboardingStep3() {
                       onClick={() => toggleTeam(team.id)}
                       className={`relative flex min-h-[164px] flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-5 text-center transition-all ${
                         isSelected
-                          ? "border-accent bg-accent/10 shadow-[0_0_0_1px_rgba(46,142,255,0.16)]"
+                          ? "border-accent bg-accent/10 surface-accent-choice"
                           : "border-muted/15 bg-surface hover:border-muted/30"
                       }`}
                     >

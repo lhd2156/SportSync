@@ -9,46 +9,55 @@ import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 import Logo from "./Logo";
 import SafeAvatar from "./SafeAvatar";
+import UserAvatarFallback from "./UserAvatarFallback";
+
+function scrollPageToTop() {
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+}
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const location = useLocation();
-  const initials =
-    user?.displayName?.charAt(0).toUpperCase() ||
-    user?.firstName?.charAt(0).toUpperCase() ||
-    user?.email?.charAt(0).toUpperCase() ||
-    "?";
-
   const navItems = [
     {
       label: "Dashboard",
       to: ROUTES.DASHBOARD,
-      active: location.pathname === ROUTES.DASHBOARD || location.pathname.startsWith("/games/"),
+      active:
+        location.pathname === ROUTES.DASHBOARD
+        || location.pathname.startsWith("/games/"),
     },
     {
-      label: "Teams",
-      to: ROUTES.TEAMS,
-      active: location.pathname === ROUTES.TEAMS || location.pathname.startsWith("/teams/"),
+      label: "Highlights",
+      to: ROUTES.HIGHLIGHTS,
+      active: location.pathname === ROUTES.HIGHLIGHTS,
     },
     {
       label: "Standings",
       to: ROUTES.STANDINGS,
       active: location.pathname === ROUTES.STANDINGS,
     },
+    {
+      label: "Teams",
+      to: ROUTES.TEAMS,
+      active: location.pathname === ROUTES.TEAMS || location.pathname.startsWith("/teams/"),
+    },
   ];
 
   return (
     <nav className="sticky top-0 z-40 bg-surface/80 backdrop-blur-lg border-b border-muted/20">
-      <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center justify-between gap-4 h-14">
-          <div className="flex min-w-0 items-center gap-8">
-            <Logo size="md" linkTo={ROUTES.HOME} />
+      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10">
+        <div className="flex h-14 items-center justify-between gap-6">
+          <div className="flex min-w-0 items-center gap-7 lg:gap-8">
+            <div className="flex shrink-0 items-center">
+              <Logo size="md" linkTo={ROUTES.HOME} />
+            </div>
 
-            <div className="hidden md:flex items-center gap-5 overflow-x-auto scrollbar-hide">
+            <div className="hidden min-w-0 md:flex items-center justify-start gap-5 overflow-x-auto scrollbar-hide">
               {navItems.map((item) => (
                 <NavLink
                   key={item.label}
                   to={item.to}
+                  onClick={item.to === ROUTES.DASHBOARD || item.to === ROUTES.STANDINGS ? scrollPageToTop : undefined}
                   className={`text-sm transition-colors whitespace-nowrap ${
                     item.active ? "text-foreground font-medium" : "text-muted hover:text-foreground"
                   }`}
@@ -59,7 +68,7 @@ export default function Navbar() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex shrink-0 items-center gap-4">
             <Link
               to={ROUTES.SETTINGS}
               className="text-sm text-muted hover:text-foreground transition-colors"
@@ -75,10 +84,10 @@ export default function Navbar() {
             <SafeAvatar
               src={user?.profilePictureUrl}
               alt="Profile"
-              className="w-8 h-8 rounded-full overflow-hidden bg-accent/20 border border-accent/20 flex items-center justify-center text-accent text-sm font-bold"
+              className="surface-avatar-ready flex h-8 w-8 items-center justify-center overflow-hidden rounded-full"
               imgClassName="w-full h-full object-cover"
               loadingContent={<div className="h-full w-full animate-pulse bg-accent/10" />}
-              fallback={initials}
+              fallback={<UserAvatarFallback className="h-4.5 w-4.5 text-accent/90" />}
             />
           </div>
         </div>

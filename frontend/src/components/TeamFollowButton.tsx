@@ -4,12 +4,12 @@ import apiClient from "../api/client";
 import { API } from "../constants";
 import type { Team } from "../types";
 
-interface TeamFollowButtonProps {
+type TeamFollowButtonProps = {
   teamId: string;
   isFollowing: boolean;
   onClick?: MouseEventHandler<HTMLButtonElement>;
   className?: string;
-}
+};
 
 export default function TeamFollowButton({
   teamId,
@@ -62,7 +62,7 @@ export default function TeamFollowButton({
       }}
       className={`inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold transition-all ${
         isFollowing
-          ? "bg-accent text-foreground shadow-[0_10px_25px_rgba(46,142,255,0.18)]"
+          ? "bg-accent text-foreground surface-accent-choice"
           : "border border-accent/35 text-accent hover:border-accent hover:bg-accent/10"
       } ${className}`}
     >

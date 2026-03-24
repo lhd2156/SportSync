@@ -1,88 +1,189 @@
-/**
- * SportSync - Terms of Service Page
- *
- * Full legal Terms of Service for the platform.
- */
-import { Link } from "react-router-dom";
-import Footer from "../components/Footer";
-import Logo from "../components/Logo";
 import { ROUTES } from "../constants";
+import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
+
+const sectionLinks = [
+  { id: "scope", label: "Scope and eligibility" },
+  { id: "accounts", label: "Accounts and security" },
+  { id: "acceptable-use", label: "Acceptable use" },
+  { id: "data-and-predictions", label: "Data and predictions" },
+  { id: "intellectual-property", label: "Intellectual property" },
+  { id: "termination", label: "Suspension and termination" },
+  { id: "liability", label: "Disclaimers and liability" },
+  { id: "governing-law", label: "Governing law" },
+  { id: "contact", label: "Contact" },
+];
+
+const relatedLinks = [
+  { label: "Privacy Policy", to: ROUTES.PRIVACY },
+  { label: "Cookie Policy", to: ROUTES.COOKIES },
+  { label: "About SportSync", to: ROUTES.ABOUT },
+];
+
+const acceptableUseItems = [
+  "Use the service only for lawful purposes.",
+  "Do not attempt to access systems, accounts, or data you are not authorized to access.",
+  "Do not interfere with product performance, security features, or service availability.",
+  "Do not scrape, harvest, or automate access to the service in a way that violates these terms or applicable law.",
+  "Do not impersonate another person, organization, or affiliation.",
+];
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground-base">
-      <header className="border-b border-muted/20 py-4 px-6">
-        <div className="max-w-3xl mx-auto flex items-center justify-between">
-          <Logo size="sm" />
-          <Link to={ROUTES.HOME} className="text-sm text-muted hover:text-foreground transition-colors">
-            ← Back to Home
-          </Link>
+    <StaticPageShell
+      eyebrow="Legal"
+      title="Terms of Service"
+      subtitle="These terms govern access to SportSync and describe the rules, responsibilities, and limits that apply when you use the product."
+      lastUpdated="March 21, 2026"
+      metadata={[
+        { label: "Applies to", value: "Website, authenticated product surfaces, and related services" },
+        { label: "Audience", value: "Users who are at least 18 years old" },
+        { label: "Related", value: "Privacy Policy and Cookie Policy" },
+      ]}
+      sectionLinks={sectionLinks}
+      relatedLinks={relatedLinks}
+    >
+      <StaticPageSection
+        id="scope"
+        title="Scope and eligibility"
+        summary="Professional legal pages are easiest to trust when they explain scope clearly at the top."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            By accessing or using SportSync, you agree to these Terms of Service. If you do not agree, do not access or use the service.
+          </p>
+          <p>
+            SportSync is intended for users who are at least 18 years old. By creating an account or using the service, you represent that you meet that requirement and that you can form a binding agreement.
+          </p>
+          <p>
+            We may revise these terms from time to time. When we do, the updated version will be posted here with a new effective date. Continued use of the service after changes take effect means you accept the revised terms.
+          </p>
         </div>
-      </header>
+      </StaticPageSection>
 
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Terms of Service</h1>
-        <p className="text-sm text-muted mb-8">Last updated: March 14, 2026</p>
-
-        <div className="space-y-8 text-sm leading-relaxed">
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">1. Acceptance of Terms</h2>
-            <p>By accessing or using SportSync ("the Service"), you agree to be bound by these Terms of Service. If you do not agree, do not use the Service. SportSync reserves the right to modify these terms at any time. Continued use of the Service after changes constitutes acceptance of the new terms.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">2. Eligibility</h2>
-            <p>You must be at least 18 years of age to create an account or use the Service. By registering, you represent and warrant that you meet this age requirement. SportSync reserves the right to verify your age and suspend or terminate accounts that do not meet this requirement.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">3. Account Registration</h2>
-            <p>To access certain features, you must create an account with a valid email address and a secure password (minimum 8 characters). You may also register using a Google account. You are responsible for maintaining the confidentiality of your login credentials and for all activities that occur under your account. You agree to notify SportSync immediately of any unauthorized use of your account.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">4. Acceptable Use</h2>
-            <p>You agree not to: (a) use the Service for any unlawful purpose; (b) attempt to gain unauthorized access to the Service or its related systems; (c) interfere with or disrupt the integrity or performance of the Service; (d) use automated means to access the Service without prior written permission; (e) scrape, data-mine, or harvest any content from the Service; (f) impersonate any person or entity.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">5. Sports Data and Predictions</h2>
-            <p>Sports scores and game data displayed on SportSync are sourced from third-party providers and may experience delays or inaccuracies. Win probability predictions are generated by machine learning models and represent statistical estimates, not guaranteed outcomes. SportSync does not endorse or encourage gambling. Predictions are for informational and entertainment purposes only. You should not rely solely on SportSync data for any financial decisions.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">6. Intellectual Property</h2>
-            <p>All content, features, and functionality of the Service, including but not limited to text, graphics, logos, and software, are owned by SportSync and are protected by copyright,  trademark, and other intellectual property laws. Team logos and league names are trademarks of their respective owners and are used for identification purposes.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">7. Limitation of Liability</h2>
-            <p>TO THE MAXIMUM EXTENT PERMITTED BY LAW, SPORTSYNC SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, OR USE, ARISING OUT OF OR IN CONNECTION WITH THE SERVICE. IN NO EVENT SHALL SPORTSYNC'S TOTAL LIABILITY EXCEED THE AMOUNT PAID BY YOU, IF ANY, FOR ACCESSING THE SERVICE DURING THE 12 MONTHS PRECEDING THE CLAIM.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">8. Indemnification</h2>
-            <p>You agree to indemnify, defend, and hold harmless SportSync and its officers, directors, employees, and agents from and against any claims, liabilities, damages, losses, and expenses arising out of or in any way connected with your access to or use of the Service or your violation of these Terms.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">9. Termination</h2>
-            <p>SportSync may suspend or terminate your account at its sole discretion, without notice, for conduct that it determines violates these Terms or is harmful to the Service, other users, or third parties. Upon termination, your right to use the Service will immediately cease. You may delete your account at any time through the Settings page.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">10. Governing Law</h2>
-            <p>These Terms shall be governed by and construed in accordance with the laws of the State of New York, United States, without regard to its conflict of law provisions. Any disputes arising from these Terms shall be resolved exclusively in the state or federal courts located in New York County, New York.</p>
-          </section>
-
-          <section>
-            <h2 className="text-lg font-semibold text-foreground mb-3">11. Contact</h2>
-            <p>If you have any questions about these Terms of Service, please contact us at legal@sportsync.app.</p>
-          </section>
+      <StaticPageSection
+        id="accounts"
+        title="Accounts and security"
+        summary="Your account is the entry point to personalized features, so it comes with a responsibility to protect access."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            Some features require an account. When you register, you agree to provide accurate information and to keep your credentials secure.
+          </p>
+          <p>
+            You are responsible for activity that occurs under your account and for maintaining the confidentiality of your login credentials. If you believe your account has been used without authorization, contact us promptly.
+          </p>
+          <p>
+            We may apply security controls such as authentication checks, rate limiting, or temporary lockouts to protect accounts and service integrity.
+          </p>
         </div>
-      </main>
+      </StaticPageSection>
 
-      <Footer />
-    </div>
+      <StaticPageSection
+        id="acceptable-use"
+        title="Acceptable use"
+        summary="This section sets practical boundaries around how the service may be used."
+      >
+        <div className="rounded-2xl border border-muted/15 bg-background/35 p-5">
+          <ul className="space-y-3 text-sm leading-7 text-muted">
+            {acceptableUseItems.map((item) => (
+              <li key={item} className="flex gap-3">
+                <span className="mt-2 h-1.5 w-1.5 flex-none rounded-full bg-accent" />
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="data-and-predictions"
+        title="Sports data and predictions"
+        summary="This is a sports product, so it is important to be explicit about what is official and what is modeled."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            SportSync uses third-party sports data providers. Because those feeds are external, information may occasionally be delayed, incomplete, unavailable, or corrected after publication.
+          </p>
+          <p>
+            Predictions and win probabilities are model-generated estimates provided for informational and entertainment purposes only. They are not guarantees, not official results, and not financial, wagering, or investment advice.
+          </p>
+          <p>
+            You are responsible for how you interpret and use the information presented through the service.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="intellectual-property"
+        title="Intellectual property"
+        summary="This section clarifies product ownership while respecting league and team marks."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            SportSync and its original product design, software, text, branding, and related materials are protected by applicable intellectual property laws.
+          </p>
+          <p>
+            Team names, league names, logos, and other third-party marks remain the property of their respective owners and are used for identification and informational purposes.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="termination"
+        title="Suspension and termination"
+        summary="We reserve the right to act when conduct creates risk for the service or other users."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            We may suspend, restrict, or terminate access if we reasonably believe a user has violated these terms, created security risk, abused the service, or used the platform in a way that could harm SportSync or others.
+          </p>
+          <p>
+            You may stop using the service at any time, and you may request account deletion through available product settings where supported.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="liability"
+        title="Disclaimers and limitation of liability"
+        summary="This section is written plainly, but the intent is the same as the standard limitations used across modern product companies."
+      >
+        <div className="space-y-4 text-sm leading-7 text-muted">
+          <p>
+            The service is provided on an "as is" and "as available" basis to the fullest extent permitted by law. We do not warrant that the service will always be uninterrupted, error-free, or perfectly accurate.
+          </p>
+          <p>
+            To the fullest extent permitted by law, SportSync will not be liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for loss of profits, data, or goodwill arising from or related to your use of the service.
+          </p>
+          <p>
+            Where liability cannot be excluded, it will be limited to the maximum extent permitted under applicable law.
+          </p>
+        </div>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="governing-law"
+        title="Governing law"
+        summary="Jurisdiction and venue help define where disputes are resolved."
+      >
+        <p className="text-sm leading-7 text-muted">
+          These terms are governed by the laws of the State of New York, without regard to conflict-of-law principles. Unless applicable law requires otherwise, disputes related to these terms or the service will be resolved in the state or federal courts located in New York County, New York.
+        </p>
+      </StaticPageSection>
+
+      <StaticPageSection
+        id="contact"
+        title="Contact"
+        summary="Questions about these terms should have a direct legal channel."
+      >
+        <p className="text-sm leading-7 text-muted">
+          For questions about these Terms of Service, contact{" "}
+          <a href="mailto:legal@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
+            legal@sportsync.app
+          </a>
+          .
+        </p>
+      </StaticPageSection>
+    </StaticPageShell>
   );
 }

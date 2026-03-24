@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 /**
  * SportSync - Authentication Context
  *
@@ -8,10 +9,10 @@
 import { createContext, useContext, useState, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
 import apiClient, { setAccessToken } from "../api/client";
-import { API } from "../constants";
+import { API, STORAGE_KEYS } from "../constants";
 import type { User } from "../types";
 
-interface AuthContextValue {
+type AuthContextValue = {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
@@ -21,7 +22,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
   setUser: (user: User) => void;
-}
+};
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -70,9 +71,27 @@ function buildUserFromResponse(data: Record<string, unknown>): User {
   };
 }
 
+function writeAuthUserSnapshot(user: User | null): void {
+  try {
+    if (!user) {
+      sessionStorage.removeItem(STORAGE_KEYS.AUTH_USER_SNAPSHOT);
+      return;
+    }
+
+    sessionStorage.setItem(STORAGE_KEYS.AUTH_USER_SNAPSHOT, JSON.stringify(user));
+  } catch {
+    // Ignore storage failures and keep auth interactive.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUserState] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const syncUser = useCallback((nextUser: User | null) => {
+    setUserState(nextUser);
+    writeAuthUserSnapshot(nextUser);
+  }, []);
 
   /* Try to restore session on mount by refreshing the access token */
   const refreshAuth = useCallback(async () => {
@@ -83,18 +102,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Try to fetch full profile; fall back to building from refresh response
       try {
         const profileResponse = await apiClient.get(API.USER_PROFILE);
-        setUser(buildUserFromResponse(profileResponse.data));
+        syncUser(buildUserFromResponse(profileResponse.data));
       } catch {
-        setUser(buildUserFromResponse(response.data));
+        syncUser(buildUserFromResponse(response.data));
       }
     } catch {
       /* No valid session, user must log in */
       setAccessToken(null);
-      setUser(null);
+      syncUser(null);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [syncUser]);
 
   useEffect(() => {
     refreshAuth();
@@ -108,8 +127,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
-    setUser(buildUserFromResponse(response.data));
-  }, []);
+    syncUser(buildUserFromResponse(response.data));
+  }, [syncUser]);
 
   const register = useCallback(async (
     email: string,
@@ -133,8 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
-    setUser(buildUserFromResponse(response.data));
-  }, []);
+    syncUser(buildUserFromResponse(response.data));
+  }, [syncUser]);
 
   const loginWithGoogle = useCallback(async (googleToken: string) => {
     const response = await apiClient.post(API.AUTH_GOOGLE, {
@@ -142,17 +161,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
-    setUser(buildUserFromResponse(response.data));
-  }, []);
+    syncUser(buildUserFromResponse(response.data));
+  }, [syncUser]);
 
   const logout = useCallback(async () => {
     try {
       await apiClient.post(API.AUTH_LOGOUT);
     } finally {
       setAccessToken(null);
-      setUser(null);
+      syncUser(null);
     }
-  }, []);
+  }, [syncUser]);
+
+  const setUser = useCallback((nextUser: User) => {
+    syncUser(nextUser);
+  }, [syncUser]);
 
   const value: AuthContextValue = {
     user,

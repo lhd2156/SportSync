@@ -35,7 +35,7 @@ class User(Base):
     # Users cannot access the dashboard until onboarding is complete
     is_onboarded = Column(Boolean, default=False, nullable=False)
 
-    # Account lockout: lock after 5 failed login attempts for 15 minutes
+    # Account lockout: lock after 3 failed login attempts for 15 minutes
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 
