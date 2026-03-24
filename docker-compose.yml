@@ -81,8 +81,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: sportsync-api
-    env_file:
-      - ./backend/.env
     environment:
       DATABASE_URL: postgresql://sportsync_user:sportsync_local_password@postgres:5432/sportsync
       REDIS_URL: redis://redis:6379
@@ -126,8 +124,6 @@ services:
       context: ./realtime
       dockerfile: Dockerfile
     container_name: sportsync-realtime
-    env_file:
-      - ./backend/.env
     environment:
       REDIS_URL: redis://redis:6379
       REDIS_CHANNEL_LIVE_SCORES: scores:live
