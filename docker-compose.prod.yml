@@ -5,17 +5,37 @@ services:
   # Production API runs as non-root with no volume mounts
   api:
     volumes: []
+    env_file:
+      - ./.env
     ports: !override
       - "127.0.0.1:8001:8000"
     environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      REDIS_CHANNEL_LIVE_SCORES: ${REDIS_CHANNEL_LIVE_SCORES:-scores:live}
       ENVIRONMENT: production
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-}
+      AWS_S3_PUBLIC_BASE_URL: ${AWS_S3_PUBLIC_BASE_URL:-}
+      AWS_S3_USE_PATH_STYLE: ${AWS_S3_USE_PATH_STYLE:-false}
     restart: always
     user: "1000:1000"
 
   # Production realtime runs as non-root
   realtime:
+    env_file:
+      - ./.env
     ports: !override
       - "127.0.0.1:8081:8080"
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      REDIS_CHANNEL_LIVE_SCORES: ${REDIS_CHANNEL_LIVE_SCORES:-scores:live}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN}
     restart: always
     user: "1000:1000"
 

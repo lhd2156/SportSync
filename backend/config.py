@@ -7,6 +7,7 @@ Never hardcode secrets here; they come from .env or environment.
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -69,6 +70,16 @@ class Settings(BaseSettings):
 
     # Environment
     environment: str = "development"
+
+    @field_validator("cookie_secure_override", mode="before")
+    @classmethod
+    def _normalize_cookie_secure_override(cls, value: object) -> object:
+        """Treat blank env values as unset so production defaults can apply."""
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @staticmethod
     def _normalize_origin(origin: str) -> str:
