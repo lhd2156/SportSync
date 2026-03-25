@@ -323,6 +323,16 @@ export interface GameDetailResponse {
   error?: string;
 }
 
+export interface GamePredictionResponse {
+  game_id: string;
+  home_win_prob: number;
+  away_win_prob: number;
+  model_version: string;
+  confidence?: number;
+  factors?: string[];
+  created_at: string;
+}
+
 export interface ResolvedPlayTeam {
   name: string;
   abbr: string;

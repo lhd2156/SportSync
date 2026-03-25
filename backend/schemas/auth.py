@@ -187,5 +187,27 @@ class PasswordResetConfirmRequest(PasswordResetTokenRequest):
     confirm_password: str = Field(min_length=8, max_length=128)
 
 
+class PasswordResetCodeConfirmRequest(BaseModel):
+    email: str
+    code: str = Field(min_length=4, max_length=12)
+    password: str = Field(min_length=8, max_length=128)
+    confirm_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        if "@" not in v:
+            raise ValueError("Must be a valid email address")
+        return v.strip().lower()
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, v: str) -> str:
+        normalized = v.strip().replace(" ", "")
+        if not normalized:
+            raise ValueError("Reset code is required")
+        return normalized
+
+
 class TokenRefreshResponse(BaseModel):
     access_token: str

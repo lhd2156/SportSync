@@ -27,12 +27,24 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_expire_minutes: int = 15
     jwt_refresh_expire_days: int = 7
-    jwt_remember_me_expire_days: int = 7
+    jwt_remember_me_expire_days: int = 30
     password_reset_expire_minutes: int = 60
 
     # Google OAuth 2.0
     google_client_id: str = ""
     google_client_secret: str = ""
+
+    # SMTP / transactional email
+    email_delivery_provider: str = "smtp"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "SportSync"
+    smtp_use_tls: bool = True
+    smtp_use_ssl: bool = False
+    aws_ses_configuration_set: str = ""
 
     # TheSportsDB
     sportsdb_api_key: str = ""
@@ -52,6 +64,8 @@ class Settings(BaseSettings):
     redirect_allowlist: str = ""
     cookie_domain: str = ""
     cookie_samesite: str = "strict"
+    cookie_secure_override: bool | None = None
+    api_ip_allowlist: str = ""
 
     # Environment
     environment: str = "development"
@@ -130,6 +144,26 @@ class Settings(BaseSettings):
         return sorted(origins)
 
     @property
+    def trusted_hosts_list(self) -> list[str]:
+        """Return allowed hostnames for Host-header validation."""
+        hosts: set[str] = {"localhost", "127.0.0.1", "testserver"}
+        for origin in [*self.cors_origins_list, *self.redirect_allowlist_list]:
+            parsed = urlparse(origin)
+            host = (parsed.hostname or "").strip().lower()
+            if host:
+                hosts.add(host)
+        if self.production_domain.strip():
+            host = (urlparse(self.production_domain.strip()).hostname or "").strip().lower()
+            if host:
+                hosts.add(host)
+        return sorted(hosts)
+
+    @property
+    def api_ip_allowlist_list(self) -> list[str]:
+        """Return optional CIDR/IP allowlist entries for API access control."""
+        return [entry.strip() for entry in self.api_ip_allowlist.split(",") if entry.strip()]
+
+    @property
     def cookie_domain_value(self) -> str | None:
         """Return the cookie domain for production deployments, or None for localhost/dev."""
         configured = self.cookie_domain.strip()
@@ -150,6 +184,8 @@ class Settings(BaseSettings):
     @property
     def cookie_secure(self) -> bool:
         """Cookies should only be marked secure outside local development."""
+        if self.cookie_secure_override is not None:
+            return self.cookie_secure_override
         return self.environment.lower() == "production"
 
     @property

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ROUTES } from "../constants";
+import { ROUTES, CONTACT_EMAILS } from "../constants";
 import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
 
 const sectionLinks = [
@@ -63,7 +63,7 @@ export default function PrivacyPage() {
       metadata={[
         { label: "Focus", value: "Transparency, product operation, and user choice" },
         { label: "Covers", value: "Account data, usage data, cookies, and security records" },
-        { label: "Contact", value: "privacy@sportsync.app" },
+        { label: "Contact", value: CONTACT_EMAILS.PRIVACY },
       ]}
       sectionLinks={sectionLinks}
       relatedLinks={relatedLinks}
@@ -171,8 +171,8 @@ export default function PrivacyPage() {
           </ul>
           <p className="mt-4 text-sm leading-7 text-muted">
             To make a privacy request or ask a question about your information, contact{" "}
-            <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-              privacy@sportsync.app
+            <a href={`mailto:${CONTACT_EMAILS.PRIVACY}`} className="text-accent transition-colors hover:text-accent-hover">
+              {CONTACT_EMAILS.PRIVACY}
             </a>
             .
           </p>
@@ -200,8 +200,8 @@ export default function PrivacyPage() {
           </p>
           <p>
             For privacy-related questions, contact{" "}
-            <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-              privacy@sportsync.app
+            <a href={`mailto:${CONTACT_EMAILS.PRIVACY}`} className="text-accent transition-colors hover:text-accent-hover">
+              {CONTACT_EMAILS.PRIVACY}
             </a>
             .
           </p>

@@ -1,12 +1,12 @@
 # SportSync Production - Docker Compose Overrides
 # Extends docker-compose.yml with production settings
 
-version: "3.9"
-
 services:
   # Production API runs as non-root with no volume mounts
   api:
     volumes: []
+    ports: !override
+      - "127.0.0.1:8001:8000"
     environment:
       ENVIRONMENT: production
     restart: always
@@ -14,12 +14,14 @@ services:
 
   # Production realtime runs as non-root
   realtime:
+    ports: !override
+      - "127.0.0.1:8081:8080"
     restart: always
     user: "1000:1000"
 
   # Production Nginx serves SSL and frontend static build
   nginx:
-    ports:
+    ports: !override
       - "80:80"
       - "443:443"
     volumes:
@@ -28,9 +30,19 @@ services:
 
   # Production PostgreSQL with persistent volume and restart policy
   postgres:
+    ports: !override
+      - "127.0.0.1:5433:5432"
     restart: always
 
   # Production Redis with persistence enabled
   redis:
+    ports: !override
+      - "127.0.0.1:6380:6379"
     command: redis-server --save 60 1 --loglevel warning
     restart: always
+
+  # Production uses AWS S3; never expose local MinIO ports publicly
+  minio:
+    ports: !override
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"

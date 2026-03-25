@@ -2,6 +2,11 @@ FROM node:20-alpine AS frontend-build
 
 WORKDIR /app/frontend
 
+ARG VITE_GOOGLE_CLIENT_ID=
+ARG VITE_ASSET_BASE_URL=
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+ENV VITE_ASSET_BASE_URL=$VITE_ASSET_BASE_URL
+
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 

@@ -336,7 +336,7 @@ def test_espn_highlight_images_upgrade_to_higher_quality():
     item = _normalize_espn_highlight_item("NHL", article, detail)
 
     assert item is not None
-    assert item["widePosterUrl"].startswith("https://a.espncdn.com/combiner/i?img=")
-    assert "w=1920" in item["widePosterUrl"]
-    assert "h=1080" in item["widePosterUrl"]
-    assert item["verticalPosterUrl"].startswith("https://a.espncdn.com/combiner/i?img=")
+    assert item["widePosterUrl"].startswith("/api/sports/highlights/image?src=")
+    assert "w%3D1920" in item["widePosterUrl"]
+    assert "h%3D1080" in item["widePosterUrl"]
+    assert item["verticalPosterUrl"].startswith("/api/sports/highlights/image?src=")

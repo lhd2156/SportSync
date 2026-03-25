@@ -85,6 +85,30 @@ function writeAuthUserSnapshot(user: User | null): void {
   }
 }
 
+function writeAuthSessionHint(enabled: boolean): void {
+  try {
+    if (!enabled) {
+      localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION_HINT);
+      return;
+    }
+
+    localStorage.setItem(STORAGE_KEYS.AUTH_SESSION_HINT, "1");
+  } catch {
+    // Ignore storage failures and keep auth interactive.
+  }
+}
+
+function hasAuthRestoreHint(): boolean {
+  try {
+    return Boolean(
+      sessionStorage.getItem(STORAGE_KEYS.AUTH_USER_SNAPSHOT)
+      || localStorage.getItem(STORAGE_KEYS.AUTH_SESSION_HINT),
+    );
+  } catch {
+    return false;
+  }
+}
+
 function clearStorageNamespace(storage: Storage, prefix: string): void {
   const keysToRemove: string[] = [];
   for (let index = 0; index < storage.length; index += 1) {
@@ -131,6 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         syncUser(buildUserFromResponse(response.data));
       }
+      writeAuthSessionHint(true);
     } catch {
       /* No valid session, user must log in */
       setAccessToken(null);
@@ -142,6 +167,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncUser]);
 
   useEffect(() => {
+    if (!hasAuthRestoreHint()) {
+      setIsLoading(false);
+      return;
+    }
     refreshAuth();
   }, [refreshAuth]);
 
@@ -153,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
+    writeAuthSessionHint(true);
     syncUser(buildUserFromResponse(response.data));
   }, [syncUser]);
 
@@ -178,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
+    writeAuthSessionHint(true);
     syncUser(buildUserFromResponse(response.data));
   }, [syncUser]);
 
@@ -187,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     setAccessToken(response.data.access_token);
+    writeAuthSessionHint(true);
     syncUser(buildUserFromResponse(response.data));
   }, [syncUser]);
 

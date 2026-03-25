@@ -32,6 +32,7 @@ from schemas.auth import (
     ChangePasswordRequest,
     PasswordResetRequest,
     PasswordResetConfirmRequest,
+    PasswordResetCodeConfirmRequest,
     TokenRefreshResponse,
 )
 from schemas.common import (
@@ -55,12 +56,20 @@ from services.auth_service import (
     record_failed_login,
     reset_failed_logins,
     store_session_in_redis,
+    validate_session_in_redis,
     delete_session_from_redis,
     blacklist_token,
     is_token_blacklisted,
 )
 from services.security_service import check_rate_limit, check_subject_rate_limit
 from services.cache_service import redis_client
+from services.email_service import email_delivery_configured, send_password_reset_code_email
+from services.password_reset_service import (
+    delete_password_reset_code,
+    generate_password_reset_code,
+    store_password_reset_code,
+    verify_password_reset_code,
+)
 from services.profile_validation import (
     is_valid_person_name,
     normalize_display_handle,
@@ -243,6 +252,11 @@ def _build_password_reset_url(request: Request, token: str) -> str:
     return f"{frontend_origin}/reset-password?token={quote(token)}"
 
 
+def _build_password_reset_code_url(request: Request, email: str) -> str:
+    frontend_origin = _resolve_frontend_origin(request).rstrip("/")
+    return f"{frontend_origin}/reset-password?email={quote(_normalize_email(email))}"
+
+
 def _prune_local_used_password_reset_tokens() -> None:
     """Drop expired local token markers used when Redis is unavailable."""
     now_ts = int(time.time())
@@ -338,6 +352,7 @@ async def register(
     user = User(
         email=normalized_email,
         hashed_password=hash_password(body.password),
+        role="user",
         first_name=body.first_name.strip(),
         last_name=body.last_name.strip(),
         display_name=normalized_display_name,
@@ -445,12 +460,15 @@ async def login(
 
 @router.post("/google", response_model=AuthResponse)
 async def google_auth(
+    request: Request,
     body: GoogleAuthRequest,
     response: Response,
     db: Session = Depends(get_db),
 ):
     """Authenticate or register via Google OAuth 2.0."""
     import httpx
+
+    check_rate_limit(request, "google")
 
     try:
         async with httpx.AsyncClient() as client:
@@ -497,6 +515,7 @@ async def google_auth(
             user = User(
                 email=email,
                 google_id=google_id,
+                role="user",
                 display_name=_generate_unique_display_name(
                     db,
                     google_display_name,
@@ -567,6 +586,8 @@ async def google_auth(
 @router.post("/refresh", response_model=TokenRefreshResponse)
 async def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     """Issue a new access token using the refresh token cookie."""
+    check_rate_limit(request, "refresh")
+
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token")
@@ -580,6 +601,16 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
 
     user_id = payload.get("sub")
     remember_me = bool(payload.get("remember_me", False))
+    if remember_me:
+        session_token = request.cookies.get("session_token")
+        if not session_token or not redis_client:
+            raise HTTPException(status_code=401, detail="Persistent session expired")
+
+        remembered_user_id = validate_session_in_redis(redis_client, session_token)
+        if str(remembered_user_id or "") != str(user_id):
+            raise HTTPException(status_code=401, detail="Persistent session expired")
+        store_session_in_redis(redis_client, session_token, str(user_id))
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
@@ -597,6 +628,8 @@ async def refresh(request: Request, response: Response, db: Session = Depends(ge
 @router.post("/logout", response_model=DetailResponse)
 async def logout(request: Request, response: Response):
     """Clear all auth cookies and blacklist the current tokens in Redis."""
+    check_rate_limit(request, "logout")
+
     refresh_token = request.cookies.get("refresh_token")
     session_token = request.cookies.get("session_token")
 
@@ -624,20 +657,41 @@ async def request_password_reset(
     Rate-limited password reset request endpoint.
     Always returns a generic response so account existence is never exposed.
     """
+    check_rate_limit(request, "password_reset_request")
+
     normalized_email = _normalize_email(body.email)
     client_ip = request.client.host if request.client else "unknown"
     response_payload: dict[str, str] = {"detail": GENERIC_PASSWORD_RESET_MESSAGE}
+
+    if settings.environment.lower() == "production" and not email_delivery_configured():
+        logger.error("Password reset requested in production but SMTP is not configured.")
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset is temporarily unavailable.",
+        )
 
     try:
         check_subject_rate_limit("password_reset", normalized_email)
         user = _find_user_by_email(db, normalized_email)
         if user:
-            reset_token, _ = create_password_reset_token(str(user.id))
-            reset_url = _build_password_reset_url(request, reset_token)
-            logger.info("Password reset link generated for user_id=%s", user.id)
+            reset_code = generate_password_reset_code()
+            ttl_seconds = max(settings.password_reset_expire_minutes * 60, 60)
+            store_password_reset_code(
+                normalized_email,
+                reset_code,
+                user_id=str(user.id),
+                ttl_seconds=ttl_seconds,
+            )
+            logger.info("Password reset code generated for user_id=%s", user.id)
+            if email_delivery_configured():
+                send_password_reset_code_email(
+                    to_email=user.email,
+                    code=reset_code,
+                    expires_minutes=settings.password_reset_expire_minutes,
+                )
             if settings.environment.lower() != "production":
-                response_payload["dev_reset_url"] = reset_url
-                response_payload["dev_reset_token"] = reset_token
+                response_payload["dev_reset_url"] = _build_password_reset_code_url(request, normalized_email)
+                response_payload["dev_reset_code"] = reset_code
     except Exception:
         logger.exception(
             "Password reset request failed for email=%s ip=%s",
@@ -651,9 +705,12 @@ async def request_password_reset(
 @router.get("/password-reset/validate", response_model=ValidResponse)
 async def validate_password_reset_token(
     token: str,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Check whether a password reset token is valid before showing the form."""
+    check_rate_limit(request, "password_reset_validate")
+
     _get_password_reset_user(db, token, require_unused=True)
     return {"valid": True}
 
@@ -661,9 +718,12 @@ async def validate_password_reset_token(
 @router.post("/password-reset/confirm", response_model=DetailResponse)
 async def confirm_password_reset(
     body: PasswordResetConfirmRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Set a new password using a valid password reset token."""
+    check_rate_limit(request, "password_reset_confirm")
+
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
@@ -694,6 +754,36 @@ async def confirm_password_reset(
     return {"detail": "Password reset successfully. Please sign in with your new password."}
 
 
+@router.post("/password-reset/code/confirm", response_model=DetailResponse)
+async def confirm_password_reset_code(
+    body: PasswordResetCodeConfirmRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Set a new password using a valid emailed one-time code."""
+    check_rate_limit(request, "password_reset_code_confirm")
+
+    if body.password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    normalized_email = _normalize_email(body.email)
+    user = _find_user_by_email(db, normalized_email)
+    if not user:
+        raise HTTPException(status_code=400, detail="That code is invalid or expired.")
+
+    verified_user_id = verify_password_reset_code(normalized_email, body.code)
+    if not verified_user_id or verified_user_id != str(user.id):
+        raise HTTPException(status_code=400, detail="That code is invalid or expired.")
+
+    user.hashed_password = hash_password(body.password)
+    user.failed_login_attempts = 0
+    user.locked_until = None
+    db.commit()
+    delete_password_reset_code(normalized_email)
+
+    return {"detail": "Password reset successfully. Please sign in with your new password."}
+
+
 # ──────────────────────────────────────────────────────────────
 # Protected Endpoints (auth required via get_current_user)
 # ──────────────────────────────────────────────────────────────
@@ -702,10 +792,13 @@ async def confirm_password_reset(
 @router.post("/onboarding/step-1", response_model=DetailResponse)
 async def onboarding_step_1(
     body: OnboardingStep1Request,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save personal info. Enforces 18+ age requirement server-side."""
+    check_rate_limit(request, "onboarding_step_1")
+
     age = _calculate_age(body.date_of_birth)
     if age < MINIMUM_AGE_YEARS:
         raise HTTPException(
@@ -742,10 +835,13 @@ async def onboarding_step_1(
 @router.post("/onboarding/step-2", response_model=DetailResponse)
 async def onboarding_step_2(
     body: OnboardingStep2Request,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save selected sports from onboarding."""
+    check_rate_limit(request, "onboarding_step_2")
+
     db.query(UserSport).filter(UserSport.user_id == user.id).delete()
     for sport in body.sports:
         db.add(UserSport(user_id=user.id, sport=sport))
@@ -757,10 +853,13 @@ async def onboarding_step_2(
 @router.post("/onboarding/complete", response_model=OnboardingCompleteResponse)
 async def onboarding_complete(
     body: OnboardingCompleteRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Save favorite teams and mark onboarding as complete."""
+    check_rate_limit(request, "onboarding_complete")
+
     saved_team_ids: set[str] = set()
 
     for raw_team_id in body.team_ids:
@@ -807,9 +906,12 @@ async def onboarding_complete(
 @router.post("/set-password", response_model=DetailResponse)
 async def set_password(
     body: SetPasswordRequest,
+    request: Request,
     user: User = Depends(get_current_user),
 ):
     """Allow Google users to set a password for email login."""
+    check_rate_limit(request, "set_password")
+
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
@@ -830,10 +932,13 @@ async def set_password(
 @router.post("/change-password", response_model=DetailResponse)
 async def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Change the current user's password. Existing-password accounts must confirm the current password."""
+    check_rate_limit(request, "change_password")
+
     if body.new_password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 

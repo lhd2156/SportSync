@@ -529,6 +529,10 @@ export default function SettingsPage() {
   }, [savedTeams]);
 
   useEffect(() => {
+    if (savedTeamsQuery.isLoading || teamsCatalogQuery.isLoading) {
+      return;
+    }
+
     if (savedTeamsQuery.isError) {
       setTeamsLoadMsg("Saved team controls will sync once the backend finishes loading.");
       return;
@@ -540,7 +544,13 @@ export default function SettingsPage() {
     }
 
     setTeamsLoadMsg("");
-  }, [savedTeamsQuery.isError, teamsCatalog, teamsCatalogQuery.isError]);
+  }, [
+    savedTeamsQuery.isError,
+    savedTeamsQuery.isLoading,
+    teamsCatalog,
+    teamsCatalogQuery.isError,
+    teamsCatalogQuery.isLoading,
+  ]);
 
   useEffect(() => {
     if (!showDelete) {

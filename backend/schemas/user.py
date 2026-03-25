@@ -6,12 +6,14 @@ Pydantic models for user profile and feed responses.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from services.profile_validation import validate_display_handle, validate_person_name
 
 
 class UserProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     email: str
     display_name: Optional[str] = None
@@ -25,9 +27,6 @@ class UserProfileResponse(BaseModel):
     provider: str = "email"
     has_password: bool = False
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class UserProfileUpdateRequest(BaseModel):

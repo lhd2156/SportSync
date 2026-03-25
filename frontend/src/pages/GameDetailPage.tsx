@@ -13,6 +13,7 @@ import { useQuery } from "@tanstack/react-query";
 import Navbar from "../components/Navbar";
 import LiveBadge from "../components/LiveBadge";
 import Footer from "../components/Footer";
+import PredictionWidget from "../components/PredictionWidget";
 import apiClient from "../api/client";
 import { API } from "../constants";
 import type {
@@ -38,6 +39,7 @@ import type {
   EspnTeamBlob,
   GameData,
   GameDetailResponse,
+  GamePredictionResponse,
   Leader,
   Play,
   PlayerStat,
@@ -553,7 +555,7 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
 });
 
 /* ── Type definitions ── */
-type Tab = "plays" | "boxscore" | "leaders" | "info";
+type Tab = "feed" | "game" | "teamA" | "teamB";
 
 const DIRECT_ESPN_SUMMARY_PATHS: Record<string, string> = {
   NFL: "football/nfl",
@@ -1458,19 +1460,20 @@ void parseSummaryLeaders;
 void parseSummaryPlays;
 
 export default function GameDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
+  const { slug, id } = useParams<{ slug?: string; id?: string }>();
   const navigate = useNavigate();
+  const routeValue = slug ?? id ?? "";
   const eventId = useMemo(() => {
-    const cleanSlug = cleanValue(slug);
+    const cleanSlug = cleanValue(routeValue);
     const match = cleanSlug.match(/(\d+)$/);
     return match?.[1] || cleanSlug;
-  }, [slug]);
+  }, [routeValue]);
   const leagueParam = useMemo(() => {
-    const cleanSlug = cleanValue(slug);
+    const cleanSlug = cleanValue(routeValue);
     return cleanValue(cleanSlug.split("-")[0]).toUpperCase();
-  }, [slug]);
+  }, [routeValue]);
   const dateParam = "";
-  const [activeTab, setActiveTab] = useState<Tab>("plays");
+  const [activeTab, setActiveTab] = useState<Tab>("feed");
   const [initializedGameId, setInitializedGameId] = useState("");
   const gameKey = `${eventId || ""}:${leagueParam || ""}:${dateParam || ""}`;
 
@@ -1498,24 +1501,38 @@ export default function GameDetailPage() {
     refetchInterval: (query) => query.state.data?.game?.status === "live" ? LIVE_GAME_REFRESH_MS : false,
   });
 
+  const { data: prediction } = useQuery<GamePredictionResponse | null>({
+    queryKey: ["game-prediction", eventId, leagueParam],
+    queryFn: async () => {
+      if (!eventId) return null;
+      try {
+        const params = leagueParam ? { league: leagueParam } : undefined;
+        const response = await apiClient.get<GamePredictionResponse>(`${API.PREDICT}/${eventId}`, { params });
+        return response.data;
+      } catch {
+        return null;
+      }
+    },
+    enabled: !!eventId,
+    staleTime: 10000,
+    refetchOnWindowFocus: false,
+    refetchInterval: () => (data?.game?.status === "live" ? LIVE_GAME_REFRESH_MS : false),
+  });
+
   useEffect(() => {
     if (!eventId || initializedGameId === gameKey) return;
     if (!data?.game) return;
 
     if (data.game.status === "upcoming") {
-      setActiveTab("info");
+      setActiveTab("game");
     } else if (data.plays.length > 0) {
-      setActiveTab("plays");
-    } else if (data.boxScore.length > 0) {
-      setActiveTab("boxscore");
-    } else if (data.leaders.length > 0) {
-      setActiveTab("leaders");
+      setActiveTab("feed");
     } else {
-      setActiveTab("info");
+      setActiveTab("game");
     }
 
     setInitializedGameId(gameKey);
-  }, [eventId, gameKey, initializedGameId, data?.game, data?.plays.length, data?.boxScore.length, data?.leaders.length]);
+  }, [eventId, gameKey, initializedGameId, data?.game, data?.plays.length]);
 
   if (isLoading) {
     return (
@@ -1601,10 +1618,10 @@ export default function GameDetailPage() {
   const lineScoreColumnCount = Math.max(home.linescores?.length || 0, away.linescores?.length || 0);
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: "plays", label: "Play-by-Play", icon: <IconPlayByPlay /> },
-    { key: "boxscore", label: "Box Score", icon: <IconBoxScore /> },
-    { key: "leaders", label: "Leaders", icon: <IconLeaders /> },
-    { key: "info", label: "Game Info", icon: <IconInfo /> },
+    { key: "feed", label: "Feed", icon: <IconPlayByPlay /> },
+    { key: "game", label: "Game", icon: <IconBoxScore /> },
+    { key: "teamA", label: "Team A", icon: <IconLeaders /> },
+    { key: "teamB", label: "Team B", icon: <IconInfo /> },
   ];
 
   return (
@@ -1745,10 +1762,36 @@ export default function GameDetailPage() {
       {/* ── Tab Content ── */}
       <main className="max-w-4xl mx-auto px-4 py-5 game-detail-enter">
         <div key={activeTab} className="tab-content-enter">
-          {activeTab === "plays" && <PlaysTab plays={data.plays} game={game} />}
-          {activeTab === "boxscore" && <BoxScoreTab boxScore={data.boxScore} league={game.league} />}
-          {activeTab === "leaders" && <LeadersTab leaders={data.leaders} homeDetail={home} awayDetail={away} league={game.league} />}
-          {activeTab === "info" && <InfoTab game={game} displayStatusDetail={displayStatusDetail} />}
+          {activeTab === "feed" && <PlaysTab plays={data.plays} game={game} />}
+          {activeTab === "game" && (
+            <GameOverviewTab
+              game={game}
+              displayStatusDetail={displayStatusDetail}
+              prediction={prediction}
+              boxScore={data.boxScore}
+              leaders={data.leaders}
+              homeDetail={home}
+              awayDetail={away}
+            />
+          )}
+          {activeTab === "teamA" && (
+            <TeamFocusTab
+              tabLabel="Team A"
+              teamDetail={away}
+              opponentDetail={home}
+              league={game.league}
+              boxScore={data.boxScore}
+            />
+          )}
+          {activeTab === "teamB" && (
+            <TeamFocusTab
+              tabLabel="Team B"
+              teamDetail={home}
+              opponentDetail={away}
+              league={game.league}
+              boxScore={data.boxScore}
+            />
+          )}
         </div>
       </main>
 
@@ -2146,6 +2189,161 @@ function buildStableBoxScoreLabels(boxScore: BoxScoreTeam[], league: string): st
   return orderedLabels;
 }
 
+function findMatchingBoxScoreTeam(boxScore: BoxScoreTeam[], teamDetail: TeamDetail): BoxScoreTeam | null {
+  const teamAbbr = cleanValue(teamDetail.abbreviation).toUpperCase();
+  const teamName = cleanValue(teamDetail.name).toLowerCase();
+  return (
+    boxScore.find((team) => cleanValue(team.teamAbbr).toUpperCase() === teamAbbr) ||
+    boxScore.find((team) => cleanValue(team.teamName).toLowerCase() === teamName) ||
+    null
+  );
+}
+
+function SingleTeamBoxScoreSection({ team, league }: { team: BoxScoreTeam; league: string }) {
+  const displayLabels = useMemo(() => buildStableBoxScoreLabels([team], league), [team, league]);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-muted/15 bg-surface">
+      <div className="flex items-center justify-between border-b border-muted/10 px-4 py-3">
+        <h4 className="text-sm font-semibold text-foreground">Player Box Score</h4>
+        <span className="text-xs uppercase tracking-[0.18em] text-muted">{team.teamAbbr}</span>
+      </div>
+      <div className="overflow-x-auto overflow-y-hidden scrollbar-hide">
+        <table className="min-w-full w-max table-fixed text-xs">
+          <colgroup>
+            <col className="w-[220px]" />
+            {displayLabels.map((label) => (
+              <col key={label} className="w-[72px]" />
+            ))}
+          </colgroup>
+          <thead>
+            <tr className="bg-background/50">
+              <th className="sticky left-0 z-10 min-w-[220px] bg-background/95 px-3 py-2 text-left font-medium text-muted">
+                Player
+              </th>
+              {displayLabels.map((label) => (
+                <th key={label} className="min-w-[72px] px-2 py-2 text-center font-medium text-muted">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-muted/8">
+            {team.players.map((player, index) => (
+              <tr key={`${player.name}-${index}`} className="transition-colors hover:bg-background/30">
+                <td className="sticky left-0 z-10 bg-surface px-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <GameHeadshotImg
+                      src={getHeadshotUrl(player.headshot)}
+                      alt={player.shortName || player.name}
+                      league={league}
+                      teamName={team.teamName}
+                      className="h-6 w-6 flex-shrink-0 rounded-full"
+                    />
+                    <div className="min-w-0">
+                      <p className="max-w-[110px] truncate text-xs font-medium text-foreground">
+                        {player.shortName || player.name}
+                      </p>
+                      {player.position ? <p className="text-[9px] text-muted">{player.position}</p> : null}
+                    </div>
+                  </div>
+                </td>
+                {displayLabels.map((label) => (
+                  <td key={label} className="px-2 py-1.5 text-center text-xs tabular-nums text-foreground-base">
+                    {player.stats[label] || "-"}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function TeamFocusTab({
+  tabLabel,
+  teamDetail,
+  opponentDetail,
+  league,
+  boxScore,
+}: {
+  tabLabel: string;
+  teamDetail: TeamDetail;
+  opponentDetail: TeamDetail;
+  league: string;
+  boxScore: BoxScoreTeam[];
+}) {
+  const teamBoxScore = useMemo(() => findMatchingBoxScoreTeam(boxScore, teamDetail), [boxScore, teamDetail]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-muted/15 bg-surface p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-accent">{tabLabel}</p>
+            <h3 className="mt-2 text-xl font-semibold text-foreground">{teamDetail.name}</h3>
+            <p className="mt-1 text-sm text-muted">Focused view against {opponentDetail.name}.</p>
+          </div>
+          <div className="grid min-w-[12rem] gap-3 text-sm sm:grid-cols-2">
+            <InfoRow label="Record" value={teamDetail.record || "—"} />
+            <InfoRow label="Score" value={teamDetail.score || "0"} />
+          </div>
+        </div>
+      </div>
+
+      {teamDetail.leaders.length > 0 ? (
+        <div className="rounded-xl border border-muted/15 bg-surface p-5">
+          <h4 className="mb-3 text-sm font-semibold text-foreground">Team Leaders</h4>
+          <div className="grid gap-3 md:grid-cols-2">
+            {teamDetail.leaders.map((leader) => (
+              <div
+                key={`${teamDetail.abbreviation}-${leader.category}-${leader.name}`}
+                className="rounded-xl border border-muted/10 bg-background/45 p-4"
+              >
+                <div className="flex items-center gap-3">
+                  <GameHeadshotImg
+                    src={getHeadshotUrl(leader.headshot)}
+                    alt={leader.name}
+                    league={league}
+                    teamName={teamDetail.name}
+                    className="h-11 w-11 rounded-full"
+                  />
+                  <div className="min-w-0">
+                    <p className="text-xs uppercase tracking-[0.18em] text-accent">{leader.category}</p>
+                    <p className="truncate text-base font-semibold text-foreground">{leader.name}</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm font-medium text-foreground-base">{leader.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {teamDetail.stats.length > 0 ? (
+        <div className="rounded-xl border border-muted/15 bg-surface p-5">
+          <h4 className="mb-3 text-sm font-semibold text-foreground">Team Stats</h4>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {teamDetail.stats.map((stat) => (
+              <div
+                key={`${teamDetail.abbreviation}-${stat.label}-${stat.name}`}
+                className="rounded-xl border border-muted/10 bg-background/45 px-4 py-3"
+              >
+                <p className="text-xs uppercase tracking-[0.16em] text-muted">{stat.label || stat.abbreviation || "Stat"}</p>
+                <p className="mt-2 text-base font-semibold text-foreground">{stat.name || "—"}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {teamBoxScore ? <SingleTeamBoxScoreSection team={teamBoxScore} league={league} /> : null}
+    </div>
+  );
+}
+
 function BoxScoreTab({ boxScore, league }: { boxScore: BoxScoreTeam[]; league: string }) {
   const [expandedTeam, setExpandedTeam] = useState<number>(0);
   const displayLabels = useMemo(() => buildStableBoxScoreLabels(boxScore, league), [boxScore, league]);
@@ -2452,3 +2650,38 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+
+function GameOverviewTab({
+  game,
+  displayStatusDetail,
+  prediction,
+  boxScore,
+  leaders,
+  homeDetail,
+  awayDetail,
+}: {
+  game: GameData;
+  displayStatusDetail: string;
+  prediction: GamePredictionResponse | null | undefined;
+  boxScore: BoxScoreTeam[];
+  leaders: Leader[];
+  homeDetail: TeamDetail;
+  awayDetail: TeamDetail;
+}) {
+  return (
+    <div className="space-y-4">
+      {prediction ? (
+        <PredictionWidget
+          homeTeam={game.homeAbbr || game.homeTeam}
+          awayTeam={game.awayAbbr || game.awayTeam}
+          homeWinProb={prediction.home_win_prob}
+          awayWinProb={prediction.away_win_prob}
+          modelVersion={prediction.model_version}
+        />
+      ) : null}
+      <LeadersTab leaders={leaders} homeDetail={homeDetail} awayDetail={awayDetail} league={game.league} />
+      {boxScore.length > 0 ? <BoxScoreTab boxScore={boxScore} league={game.league} /> : null}
+      <InfoTab game={game} displayStatusDetail={displayStatusDetail} />
+    </div>
+  );
+}

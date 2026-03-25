@@ -12,7 +12,7 @@ APP_DESCRIPTION = "Real-time multi-sport platform API"
 
 # Authentication
 BCRYPT_COST_FACTOR = 12
-MAX_FAILED_LOGIN_ATTEMPTS = 3
+MAX_FAILED_LOGIN_ATTEMPTS = 5
 ACCOUNT_LOCKOUT_MINUTES = 15
 SESSION_TOKEN_BYTES = 32
 
@@ -21,7 +21,7 @@ CACHE_TTL_LIVE_SCORES = 120        # 2 minutes for live score data
 CACHE_TTL_FEED = 300               # 5 minutes for personalized feed
 CACHE_TTL_STANDINGS = 3600         # 1 hour for standings and rosters
 CACHE_TTL_TEAM_DATA = 21600        # 6 hours for team metadata
-CACHE_TTL_SESSION = 604800         # 7 days for Remember Me sessions
+CACHE_TTL_SESSION = 2592000        # 30 days for Remember Me sessions
 
 # Rate Limiting
 RATE_LIMIT_LOGIN_MAX = 10          # 10 attempts per IP per window
@@ -30,6 +30,8 @@ RATE_LIMIT_REGISTER_MAX = 5        # 5 registrations per IP per window
 RATE_LIMIT_REGISTER_WINDOW = 3600  # 1 hour window
 RATE_LIMIT_PASSWORD_RESET_MAX = 3  # 3 reset requests per email per window
 RATE_LIMIT_PASSWORD_RESET_WINDOW = 3600  # 1 hour window
+PASSWORD_RESET_CODE_LENGTH = 6
+PASSWORD_RESET_CODE_MAX_ATTEMPTS = 5
 
 # Redis Key Prefixes
 REDIS_PREFIX_SESSION = "session:"

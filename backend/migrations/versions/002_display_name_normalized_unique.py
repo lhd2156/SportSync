@@ -21,30 +21,31 @@ def upgrade() -> None:
         sa.Column("display_name_normalized", sa.String(length=100), nullable=True),
     )
 
+    users_table = sa.table(
+        "users",
+        sa.column("display_name", sa.String(length=100)),
+        sa.column("display_name_normalized", sa.String(length=100)),
+    )
+
     bind = op.get_bind()
     bind.execute(
-        sa.text(
-            """
-            UPDATE users
-            SET
-                display_name = NULLIF(BTRIM(display_name), ''),
-                display_name_normalized = NULLIF(LOWER(BTRIM(display_name)), '')
-            WHERE display_name IS NOT NULL
-            """
+        users_table.update()
+        .where(users_table.c.display_name.is_not(None))
+        .values(
+            display_name=sa.func.nullif(sa.func.btrim(users_table.c.display_name), ""),
+            display_name_normalized=sa.func.nullif(
+                sa.func.lower(sa.func.btrim(users_table.c.display_name)),
+                "",
+            ),
         )
     )
 
     duplicates = bind.execute(
-        sa.text(
-            """
-            SELECT display_name_normalized
-            FROM users
-            WHERE display_name_normalized IS NOT NULL
-            GROUP BY display_name_normalized
-            HAVING COUNT(*) > 1
-            ORDER BY display_name_normalized
-            """
-        )
+        sa.select(users_table.c.display_name_normalized)
+        .where(users_table.c.display_name_normalized.is_not(None))
+        .group_by(users_table.c.display_name_normalized)
+        .having(sa.func.count() > 1)
+        .order_by(users_table.c.display_name_normalized)
     ).fetchall()
     if duplicates:
         duplicate_values = ", ".join(row[0] for row in duplicates)

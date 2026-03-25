@@ -14,6 +14,7 @@ class ValidResponse(BaseModel):
 class PasswordResetResponse(DetailResponse):
     dev_reset_url: str | None = None
     dev_reset_token: str | None = None
+    dev_reset_code: str | None = None
 
 
 class OnboardingCompleteResponse(DetailResponse):

@@ -37,11 +37,9 @@ class StoredObject:
 
 
 def _is_s3_enabled() -> bool:
-    return bool(
-        settings.aws_s3_bucket.strip()
-        and settings.aws_access_key_id.strip()
-        and settings.aws_secret_access_key.strip()
-    )
+    # Allow either static credentials or the default AWS credential chain
+    # (for example EC2 instance roles) as long as a bucket is configured.
+    return bool(settings.aws_s3_bucket.strip())
 
 
 def _build_avatar_object_key(user_id: str, content_type: str) -> str:

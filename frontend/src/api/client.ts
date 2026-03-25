@@ -36,6 +36,42 @@ export function getAccessToken(): string | null {
   return accessToken;
 }
 
+const AUTH_ENDPOINTS_THAT_SHOULD_NOT_TRIGGER_REFRESH = new Set<string>([
+  API.AUTH_LOGIN,
+  API.AUTH_REGISTER,
+  API.AUTH_GOOGLE,
+  API.AUTH_LOGOUT,
+  API.AUTH_PASSWORD_RESET,
+  API.AUTH_PASSWORD_RESET_VALIDATE,
+  API.AUTH_PASSWORD_RESET_CONFIRM,
+  API.AUTH_PASSWORD_RESET_CODE_CONFIRM,
+]);
+
+function getRequestPath(url: unknown): string {
+  if (typeof url !== "string" || url.trim() === "") {
+    return "";
+  }
+
+  try {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      return new URL(url).pathname;
+    }
+  } catch {
+    // Fall through to the raw string return below.
+  }
+
+  return url;
+}
+
+function shouldAttemptTokenRefresh(url: unknown): boolean {
+  const requestPath = getRequestPath(url);
+  if (!requestPath) {
+    return true;
+  }
+
+  return !AUTH_ENDPOINTS_THAT_SHOULD_NOT_TRIGGER_REFRESH.has(requestPath);
+}
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
@@ -58,10 +94,16 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    const isRefreshAttempt = originalRequest.url === API.AUTH_REFRESH;
+    const requestPath = getRequestPath(originalRequest?.url);
+    const isRefreshAttempt = requestPath === API.AUTH_REFRESH;
     const alreadyRetried = originalRequest._retry;
 
-    if (error.response?.status === 401 && !isRefreshAttempt && !alreadyRetried) {
+    if (
+      error.response?.status === 401
+      && !isRefreshAttempt
+      && !alreadyRetried
+      && shouldAttemptTokenRefresh(originalRequest?.url)
+    ) {
       originalRequest._retry = true;
       try {
         const refreshResponse = await apiClient.post(API.AUTH_REFRESH);

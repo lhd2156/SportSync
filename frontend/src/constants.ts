@@ -7,6 +7,12 @@ export const APP_NAME = "SportSync";
 export const APP_VERSION = "0.1";
 export const APP_TAGLINE = "Your personalized sports command center";
 
+export const CONTACT_EMAILS = {
+  PRIVACY: "privacy@onsportsync.com",
+  LEGAL: "legal@onsportsync.com",
+  NO_REPLY: "noreply@onsportsync.com",
+} as const;
+
 /* Supported sports shown in the tab bar and onboarding */
 export const SUPPORTED_SPORTS = [
   { id: "NFL", label: "NFL", sport: "Football" },
@@ -50,6 +56,7 @@ export const API = {
   AUTH_PASSWORD_RESET: "/api/auth/password-reset",
   AUTH_PASSWORD_RESET_VALIDATE: "/api/auth/password-reset/validate",
   AUTH_PASSWORD_RESET_CONFIRM: "/api/auth/password-reset/confirm",
+  AUTH_PASSWORD_RESET_CODE_CONFIRM: "/api/auth/password-reset/code/confirm",
   AUTH_CHANGE_PASSWORD: "/api/auth/change-password",
   ONBOARDING_STEP_1: "/api/auth/onboarding/step-1",
   ONBOARDING_STEP_2: "/api/auth/onboarding/step-2",
@@ -95,6 +102,7 @@ export const COOKIE_NAMES = {
 
 export const STORAGE_KEYS = {
   AUTH_USER_SNAPSHOT: "sportsync_auth_user_snapshot_v1",
+  AUTH_SESSION_HINT: "sportsync_auth_session_hint_v1",
 } as const;
 
 /* Minimum age required to use the platform */

@@ -19,4 +19,4 @@ USER sportsync
 
 EXPOSE 8000
 
-CMD ["/app/docker-entrypoint.sh"]
+CMD ["sh", "/app/docker-entrypoint.sh"]

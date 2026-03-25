@@ -69,3 +69,24 @@ async def require_onboarded(
             detail="Onboarding not complete",
         )
     return user
+
+
+def require_role(*allowed_roles: str):
+    """Return a dependency that enforces role-based access control."""
+    normalized_roles = {role.strip().lower() for role in allowed_roles if role.strip()}
+
+    async def _dependency(user: User = Depends(get_current_user)) -> User:
+        user_role = str(getattr(user, "role", "user") or "user").strip().lower()
+        if normalized_roles and user_role not in normalized_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to access this resource",
+            )
+        return user
+
+    return _dependency
+
+
+async def require_admin(user: User = Depends(require_role("admin"))) -> User:
+    """Require an administrator account."""
+    return user

@@ -6,10 +6,12 @@ Pydantic models for teams, games, scores, and prediction responses.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class TeamResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     external_id: str
     name: str
@@ -21,11 +23,10 @@ class TeamResponse(BaseModel):
     record: Optional[str] = None
     color: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
 
 class GameResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     home_team: TeamResponse
     away_team: TeamResponse
@@ -36,11 +37,10 @@ class GameResponse(BaseModel):
     home_score: int
     away_score: int
 
-    class Config:
-        from_attributes = True
-
 
 class PredictionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
     id: str
     game_id: str
     home_win_prob: float
@@ -49,9 +49,6 @@ class PredictionResponse(BaseModel):
     created_at: datetime
     confidence: Optional[float] = None
     factors: Optional[list[str]] = None
-
-    class Config:
-        from_attributes = True
 
 
 class ScoreEventSchema(BaseModel):
