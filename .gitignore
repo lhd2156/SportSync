@@ -75,6 +75,8 @@ highlights-*.png
 
 # AWS
 .aws/
+.aws-deploy/
+aws-ssm-*.json
 *.tfstate
 *.tfstate.*
 

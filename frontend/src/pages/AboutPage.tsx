@@ -1,4 +1,4 @@
-import { ROUTES, APP_VERSION } from "../constants";
+import { ROUTES, APP_VERSION, CONTACT_EMAILS } from "../constants";
 import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
 
 const sectionLinks = [
@@ -154,14 +154,14 @@ export default function AboutPage() {
             <div className="mt-3 space-y-2 text-sm text-muted">
               <p>
                 Privacy:{" "}
-                <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-                  privacy@sportsync.app
+                <a href={`mailto:${CONTACT_EMAILS.PRIVACY}`} className="text-accent transition-colors hover:text-accent-hover">
+                  {CONTACT_EMAILS.PRIVACY}
                 </a>
               </p>
               <p>
                 Legal:{" "}
-                <a href="mailto:legal@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-                  legal@sportsync.app
+                <a href={`mailto:${CONTACT_EMAILS.LEGAL}`} className="text-accent transition-colors hover:text-accent-hover">
+                  {CONTACT_EMAILS.LEGAL}
                 </a>
               </p>
             </div>

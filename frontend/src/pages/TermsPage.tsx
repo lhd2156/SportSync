@@ -1,4 +1,4 @@
-import { ROUTES } from "../constants";
+import { ROUTES, CONTACT_EMAILS } from "../constants";
 import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
 
 const sectionLinks = [
@@ -178,8 +178,8 @@ export default function TermsPage() {
       >
         <p className="text-sm leading-7 text-muted">
           For questions about these Terms of Service, contact{" "}
-          <a href="mailto:legal@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-            legal@sportsync.app
+          <a href={`mailto:${CONTACT_EMAILS.LEGAL}`} className="text-accent transition-colors hover:text-accent-hover">
+            {CONTACT_EMAILS.LEGAL}
           </a>
           .
         </p>

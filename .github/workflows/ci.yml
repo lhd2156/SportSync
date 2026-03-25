@@ -1,0 +1,147 @@
+name: SportSync CI
+
+on:
+  push:
+    branches: [main, dev, predeploy-final]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  test-backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sportsync_test
+          POSTGRES_USER: sportsync
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Run pytest suite
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://sportsync:test_password@localhost:5432/sportsync_test
+          REDIS_URL: redis://localhost:6379
+          REDIS_CHANNEL_LIVE_SCORES: scores:live
+          JWT_SECRET: ci-test-secret-key-minimum-32-characters-long
+          JWT_ALGORITHM: HS256
+          ENVIRONMENT: test
+        run: pytest tests/ -v --tb=short
+
+  test-realtime:
+    name: Realtime Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Run Go tests
+        working-directory: realtime
+        run: go test ./...
+
+      - name: Build realtime service
+        working-directory: realtime
+        run: go build ./...
+
+  validate-docker:
+    name: Docker Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker compose
+        run: docker compose config
+
+      - name: Validate nginx config
+        run: |
+          mkdir -p /tmp/letsencrypt/live/onsportsync.com
+          mkdir -p /tmp/nginx-includes
+          cp "${{ github.workspace }}/nginx/includes/api-allowlist.conf" /tmp/nginx-includes/api-allowlist.conf
+          openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout /tmp/letsencrypt/live/onsportsync.com/privkey.pem \
+            -out /tmp/letsencrypt/live/onsportsync.com/fullchain.pem \
+            -days 1 \
+            -subj "/CN=localhost"
+          docker run --rm \
+            --add-host api:127.0.0.1 \
+            --add-host realtime:127.0.0.1 \
+            -v "/tmp/letsencrypt:/etc/letsencrypt:ro" \
+            -v "/tmp/nginx-includes:/etc/nginx/includes:ro" \
+            -v "${{ github.workspace }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine nginx -t
+          docker run --rm \
+            --add-host api:127.0.0.1 \
+            --add-host realtime:127.0.0.1 \
+            -v "/tmp/nginx-includes:/etc/nginx/includes:ro" \
+            -v "${{ github.workspace }}/nginx/nginx.http.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine nginx -t
+
+      - name: Build API and realtime images
+        run: |
+          docker build -t sportsync-api-ci ./backend
+          docker build -t sportsync-realtime-ci ./realtime
+          docker build -t sportsync-nginx-ci -f nginx/Dockerfile .
+
+  build-frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          VITE_GOOGLE_CLIENT_ID: placeholder
+        run: npm run build

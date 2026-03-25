@@ -11,7 +11,33 @@ import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-export const GOOGLE_SIGN_IN_AVAILABLE = Boolean(GOOGLE_CLIENT_ID);
+const GOOGLE_ALLOWED_ORIGINS = String(import.meta.env.VITE_GOOGLE_ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function getCurrentOrigin(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.location.origin;
+}
+
+function googleSignInAllowedForCurrentOrigin(): boolean {
+  if (!GOOGLE_CLIENT_ID) {
+    return false;
+  }
+
+  const currentOrigin = getCurrentOrigin();
+  if (!currentOrigin) {
+    return false;
+  }
+
+  return GOOGLE_ALLOWED_ORIGINS.includes(currentOrigin);
+}
+
+export const GOOGLE_SIGN_IN_AVAILABLE = googleSignInAllowedForCurrentOrigin();
 
 type Props = {
   /** Text on the button label — "signin_with" or "continue_with" */
@@ -24,6 +50,7 @@ export default function GoogleSignInButton({ text = "continue_with" }: Props) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const [error, setError] = useState("");
+  const googleSignInEnabled = googleSignInAllowedForCurrentOrigin();
 
   const handleCredentialResponse = useCallback(
     async (response: { credential: string }) => {
@@ -44,7 +71,7 @@ export default function GoogleSignInButton({ text = "continue_with" }: Props) {
   );
 
   useEffect(() => {
-    if (!GOOGLE_SIGN_IN_AVAILABLE || initializedRef.current) return;
+    if (!googleSignInEnabled || initializedRef.current) return;
 
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
@@ -72,9 +99,13 @@ export default function GoogleSignInButton({ text = "continue_with" }: Props) {
     return () => {
       // Don't remove the script on unmount — GIS doesn't like that
     };
-  }, [handleCredentialResponse, text]);
+  }, [googleSignInEnabled, handleCredentialResponse, text]);
 
   // Fallback button when GIS hasn't loaded yet
+  if (!googleSignInEnabled) {
+    return null;
+  }
+
   return (
     <div className="w-full">
       <div ref={buttonRef} className="w-full flex justify-center" />

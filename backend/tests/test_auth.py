@@ -68,11 +68,12 @@ class TestJWT:
         assert max_age > 0
 
     def test_remember_me_longer_expiry(self):
-        """Remember Me refresh token should match the standard 7-day expiry."""
+        """Remember Me refresh token should extend to 30 days."""
         from services.auth_service import create_refresh_token
         _, normal_max_age = create_refresh_token("user", remember_me=False)
         _, remember_max_age = create_refresh_token("user", remember_me=True)
-        assert remember_max_age == normal_max_age == 7 * 86400
+        assert normal_max_age == 7 * 86400
+        assert remember_max_age == 30 * 86400
 
     def test_invalid_token_returns_none(self):
         """Garbage token should return None from decode."""
@@ -101,6 +102,11 @@ class TestConstants:
         """bcrypt cost must be 12 per Section 12."""
         from constants import BCRYPT_COST_FACTOR
         assert BCRYPT_COST_FACTOR == 12
+
+    def test_account_lockout_threshold(self):
+        """Account lockout should trigger after 5 failed attempts."""
+        from constants import MAX_FAILED_LOGIN_ATTEMPTS
+        assert MAX_FAILED_LOGIN_ATTEMPTS == 5
 
 
 def _calculate_age(dob: date) -> int:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -17,7 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from dependencies import get_current_user
+from dependencies import get_current_user, require_admin
 from ml.predict import ensure_prediction_game, get_prediction_model_version, predict_game_probabilities
 from models.game import Game
 from models.prediction import Prediction
@@ -39,6 +40,14 @@ _PREDICTION_UPCOMING_TTL_SECONDS = 900
 _PREDICTION_FINAL_TTL_SECONDS = 21600
 _PREDICTION_REQUEST_CACHE_VERSION = "v1"
 _PREDICTION_BATCH_CONCURRENCY = 5
+_FALLBACK_MODEL_VERSION = "fallback_v1"
+_FALLBACK_MARGIN_SCALES = {
+    "NFL": 7.0,
+    "NBA": 11.0,
+    "MLB": 2.0,
+    "NHL": 1.5,
+    "EPL": 1.0,
+}
 
 
 def _prediction_ttl_for_status(status: str | None) -> int:
@@ -94,6 +103,59 @@ def _prediction_payload_from_values(
     return payload
 
 
+def _clamp_probability(value: float, floor: float = 0.02, ceiling: float = 0.98) -> float:
+    return max(floor, min(ceiling, float(value)))
+
+
+def _fallback_prediction_values(game: Game) -> dict[str, Any]:
+    league_key = str(game.league or "").upper().strip()
+    status = str(game.status or "").lower().strip()
+    home_score = int(game.home_score or 0)
+    away_score = int(game.away_score or 0)
+    margin = home_score - away_score
+    scale = float(_FALLBACK_MARGIN_SCALES.get(league_key, 8.0))
+
+    if status == "final":
+        if margin > 0:
+            home_win_prob = 0.995
+        elif margin < 0:
+            home_win_prob = 0.005
+        else:
+            home_win_prob = 0.5
+        confidence = 0.99
+        factors = [
+            "Fallback inference used while a league-specific model is unavailable.",
+            "Final score outcome anchors the probability estimate.",
+        ]
+    elif status == "live":
+        logistic_home = 1.0 / (1.0 + math.exp(-(margin / max(scale, 0.5))))
+        home_win_prob = _clamp_probability((0.88 * logistic_home) + 0.0624)
+        confidence = round(
+            min(0.9, 0.55 + min(abs(margin) / max(scale * 2.0, 1.0), 1.0) * 0.3),
+            4,
+        )
+        factors = [
+            "Fallback inference used while a league-specific model is unavailable.",
+            "Live score margin is shaping the current win estimate.",
+        ]
+    else:
+        home_win_prob = 0.52
+        confidence = 0.52
+        factors = [
+            "Fallback inference used while a league-specific model is unavailable.",
+            "Pre-game estimate applies a modest home-side baseline edge.",
+        ]
+
+    away_win_prob = round(1.0 - home_win_prob, 4)
+    return {
+        "home_win_prob": round(home_win_prob, 4),
+        "away_win_prob": away_win_prob,
+        "model_version": _FALLBACK_MODEL_VERSION,
+        "confidence": confidence,
+        "factors": factors,
+    }
+
+
 def _read_cached_prediction(game: Game) -> dict | None:
     cached = get_cached(_prediction_cache_key(game))
     if isinstance(cached, dict) and "home_win_prob" in cached and "away_win_prob" in cached:
@@ -139,7 +201,7 @@ def _prediction_payload_from_record(game: Game, prediction: Prediction | None) -
 @router.get("/ml/status", response_model=dict[str, Any])
 async def ml_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Check the current state of ML training data and model."""
     rows = (
@@ -184,7 +246,7 @@ async def ml_status(
 @router.post("/ml/seed", response_model=dict[str, Any])
 async def ml_seed(
     league: str = Query(default="ALL", description="League to seed (NBA, NFL, NHL, MLB, EPL, or ALL)"),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
     """Seed the database with full season data from ESPN for ML training."""
     from ml.seed_data import seed_league, LEAGUES as SEED_LEAGUES
@@ -210,7 +272,7 @@ async def ml_seed(
 
 
 @router.post("/ml/retrain", response_model=dict[str, Any])
-async def ml_retrain(current_user: User = Depends(get_current_user)):
+async def ml_retrain(current_user: User = Depends(require_admin)):
     """Retrain the ML model using all available data in the database."""
     try:
         from ml.train import train_models
@@ -294,7 +356,10 @@ async def get_predictions_batch(
                     ensure_prediction_game(session, game_id, league_hint=league_hint),
                     timeout=_PREDICTION_TIMEOUT_SECONDS,
                 )
-                prediction_data = await predict_game_probabilities(session, game)
+                try:
+                    prediction_data = await predict_game_probabilities(session, game)
+                except RuntimeError:
+                    prediction_data = _fallback_prediction_values(game)
 
                 prediction = session.query(Prediction).filter(Prediction.game_id == game.id).first()
                 if not prediction:
@@ -412,7 +477,10 @@ async def get_prediction(
             timeout=_PREDICTION_TIMEOUT_SECONDS,
         )
         # predict_game_probabilities is now async (fetches injuries/odds)
-        prediction_data = await predict_game_probabilities(db, game)
+        try:
+            prediction_data = await predict_game_probabilities(db, game)
+        except RuntimeError:
+            prediction_data = _fallback_prediction_values(game)
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=504,
@@ -422,8 +490,6 @@ async def get_prediction(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Prediction inference failed for game %s", game_id)
         raise HTTPException(

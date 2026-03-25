@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from functools import cmp_to_key
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlencode, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from fastapi import APIRouter, Query, Response
 import httpx
@@ -562,24 +562,38 @@ async def sports_highlight_image(src: str = Query(..., description="Absolute hig
             headers={"Cache-Control": f"public, max-age={HIGHLIGHT_IMAGE_PROXY_TTL}"},
         )
 
+    candidate_urls: list[str] = []
+
+    def add_candidate(url: str):
+        normalized = _clean_news_text(url)
+        if normalized and normalized not in candidate_urls:
+            candidate_urls.append(normalized)
+
+    add_candidate(clean_url)
+    for candidate in _build_espn_image_candidates(clean_url):
+        add_candidate(candidate)
+
     client = await _get_http_client()
-    try:
-        response = await client.get(clean_url, timeout=12.0)
-        response.raise_for_status()
-    except Exception:
-        return Response(status_code=404)
+    for candidate_url in candidate_urls:
+        try:
+            response = await client.get(candidate_url, timeout=12.0)
+            response.raise_for_status()
+        except Exception:
+            continue
 
-    media_type = (response.headers.get("content-type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
-    payload = response.content
-    if not payload:
-        return Response(status_code=404)
+        media_type = (response.headers.get("content-type") or "image/jpeg").split(";")[0].strip() or "image/jpeg"
+        payload = response.content
+        if not payload:
+            continue
 
-    _binary_cache[cache_key] = (time.time(), payload, media_type)
-    return Response(
-        content=payload,
-        media_type=media_type,
-        headers={"Cache-Control": f"public, max-age={HIGHLIGHT_IMAGE_PROXY_TTL}"},
-    )
+        _binary_cache[cache_key] = (time.time(), payload, media_type)
+        return Response(
+            content=payload,
+            media_type=media_type,
+            headers={"Cache-Control": f"public, max-age={HIGHLIGHT_IMAGE_PROXY_TTL}"},
+        )
+
+    return Response(status_code=404)
 
 
 def _should_retry_scoreboard_fetch(url: str, data: dict | list | None) -> bool:
@@ -731,9 +745,19 @@ def _build_espn_image_candidates(src: str) -> list[str]:
         query = parse_qs(parsed.query)
         img_path = (query.get("img") or [""])[0]
         if img_path:
-            if img_path.startswith("/"):
-                add(f"https://a.espncdn.com{img_path}")
-            encoded_img = quote(img_path, safe="/")
+            normalized_img_path = img_path
+            for _ in range(2):
+                decoded_img_path = unquote(normalized_img_path)
+                if decoded_img_path == normalized_img_path:
+                    break
+                normalized_img_path = decoded_img_path
+
+            if normalized_img_path.startswith("/"):
+                add(f"https://a.espncdn.com{normalized_img_path}")
+            elif normalized_img_path.startswith("http://") or normalized_img_path.startswith("https://"):
+                add(normalized_img_path)
+
+            encoded_img = quote(normalized_img_path, safe="/:")
             add(f"https://a.espncdn.com/combiner/i?img={encoded_img}&w=160&h=160")
             add(f"https://a.espncdn.com/combiner/i?img={encoded_img}&w=320&h=320")
     elif "/i/headshots/" in parsed.path:
@@ -1270,6 +1294,10 @@ def _build_highlight_image_proxy_url(url: str) -> str:
 
     parsed = urlparse(clean_url)
     if parsed.scheme not in {"http", "https"} or not _is_allowed_highlight_image_host(parsed.netloc):
+        return clean_url
+
+    host = parsed.netloc.lower()
+    if "espncdn.com" not in host and "video-cdn.espn.com" not in host:
         return clean_url
 
     return f"/api/sports/highlights/image?{urlencode({'src': clean_url})}"
@@ -2043,6 +2071,11 @@ def _build_highlight_payload(
     event_id: str = "",
     video_ratio: str = "",
 ) -> dict:
+    resolved_poster_url = _build_highlight_image_proxy_url(poster_url) or None
+    resolved_wide_poster_url = _build_highlight_image_proxy_url(wide_poster_url or poster_url) or resolved_poster_url
+    resolved_square_poster_url = _build_highlight_image_proxy_url(square_poster_url or poster_url) or resolved_poster_url
+    resolved_vertical_poster_url = _build_highlight_image_proxy_url(vertical_poster_url or poster_url) or resolved_poster_url
+
     return {
         "id": highlight_id,
         "league": league_label,
@@ -2053,10 +2086,10 @@ def _build_highlight_payload(
         "publishedTs": _parse_sortable_timestamp(published_at),
         "durationSeconds": duration_seconds,
         "durationLabel": _format_duration_label(duration_seconds),
-        "posterUrl": poster_url or None,
-        "widePosterUrl": wide_poster_url or poster_url or None,
-        "squarePosterUrl": square_poster_url or poster_url or None,
-        "verticalPosterUrl": vertical_poster_url or poster_url or None,
+        "posterUrl": resolved_poster_url,
+        "widePosterUrl": resolved_wide_poster_url,
+        "squarePosterUrl": resolved_square_poster_url,
+        "verticalPosterUrl": resolved_vertical_poster_url,
         "videoUrl": video_url or None,
         "hlsUrl": hls_url or None,
         "videoVariants": video_variants or [],

@@ -29,7 +29,7 @@ function OnboardingProgress({ currentStep }: OnboardingProgressProps) {
                 : "bg-surface border border-muted/20 text-muted"
             }`}
           >
-            {step.num < currentStep ? "✓" : step.num}
+            {step.num < currentStep ? (<span className="h-2.5 w-2.5 rounded-full bg-current" aria-hidden="true" />) : (step.num)}
           </div>
           <span
             className={`text-sm hidden sm:inline ${

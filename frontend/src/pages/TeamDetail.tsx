@@ -433,7 +433,7 @@ function TeamSeasonSelector({
                       }`}
                     >
                       <span>{seasonOption.displayName}</span>
-                      {isSelected ? <span className="text-base leading-none">✓</span> : null}
+                      {isSelected ? (<span className="inline-block h-2.5 w-2.5 rounded-full bg-current" aria-hidden="true" />) : null}
                     </button>
                   );
                 })}
@@ -867,7 +867,7 @@ export default function TeamDetail() {
                 <FiTrendingUp className="h-5 w-5 text-accent" />
                 <div>
                   <h2 className="text-xl font-semibold text-foreground">Recent Pulse</h2>
-                  <p className="text-sm text-muted">The last five results in this team’s run.</p>
+                  <p className="text-sm text-muted">The last five results in this teamâ€™s run.</p>
                 </div>
               </div>
 
@@ -1077,7 +1077,7 @@ export default function TeamDetail() {
                         ) : null}
                       </div>
                       <p className="mt-1 text-sm text-muted">
-                        {[player.position, player.status].filter(Boolean).join(" • ") || "Active roster"}
+                        {[player.position, player.status].filter(Boolean).join(" â€¢ ") || "Active roster"}
                       </p>
                     </div>
 
@@ -1124,11 +1124,11 @@ export default function TeamDetail() {
               series={[{ dataKey: "value", color: accent, name: "Average" }]}
             />
 
-            {/* Win/Loss Streak — custom visual instead of chart */}
+            {/* Win/Loss Streak â€” custom visual instead of chart */}
             <div className="xl:col-span-2 rounded-3xl border border-muted/15 bg-surface p-5">
               <h3 className="text-base font-semibold text-foreground">Win/Loss Streak</h3>
               <p className="mt-1 text-sm text-muted mb-5">
-                Last {winTrend.length} completed games — {winTrend.filter(g => g.won).length}W {winTrend.filter(g => !g.won).length}L
+                Last {winTrend.length} completed games â€” {winTrend.filter(g => g.won).length}W {winTrend.filter(g => !g.won).length}L
               </p>
 
               {winTrend.length === 0 ? (

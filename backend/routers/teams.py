@@ -826,7 +826,7 @@ async def list_teams(
     db: Session = Depends(get_db),
 ):
     """All teams, optionally filtered by sport/league, with cached current records."""
-    cache_key = f"teams:{sport or 'all'}:{league or 'all'}:p{page}:s{page_size}:v4"
+    cache_key = f"teams:{sport or 'all'}:{league or 'all'}:p{page}:s{page_size}:v6"
     cached = get_cached(cache_key)
     if cached is not None:
         return cached
@@ -844,7 +844,6 @@ async def list_teams(
         .limit(page_size)
         .all()
     )
-    local_record_lookup = _build_local_record_lookup(db, [str(team.id) for team in teams])
     league_keys = sorted(
         {
             league_key
@@ -853,9 +852,12 @@ async def list_teams(
             if league_key in ESPN_STANDINGS_URLS
         }
     )
+    summary_lookup_payloads = await asyncio.gather(
+        *[_fetch_league_summary_lookup(league_key) for league_key in league_keys]
+    ) if league_keys else []
     summary_lookups = {
-        league_key: _read_cached_league_summary_lookup(league_key)
-        for league_key in league_keys
+        league_key: lookup
+        for league_key, lookup in zip(league_keys, summary_lookup_payloads)
     }
 
     result = []
@@ -882,7 +884,7 @@ async def list_teams(
         result.append(
             _team_payload(
                 team,
-                record=local_record_lookup.get(str(team.id)) or summary_data.get("record"),
+                record=summary_data.get("record"),
                 color=summary_data.get("color"),
             )
         )

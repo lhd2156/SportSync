@@ -24,6 +24,7 @@ class User(Base):
 
     # Only set for users who registered via Google OAuth
     google_id = Column(String, nullable=True, unique=True)
+    role = Column(String(20), nullable=False, default="user", server_default="user")
 
     display_name = Column(String(100), nullable=True)
     display_name_normalized = Column(String(100), nullable=True, unique=True, index=True)
@@ -36,7 +37,7 @@ class User(Base):
     # Users cannot access the dashboard until onboarding is complete
     is_onboarded = Column(Boolean, default=False, nullable=False)
 
-    # Account lockout: lock after 3 failed login attempts for 15 minutes
+    # Account lockout: lock after 5 failed login attempts for 15 minutes
     failed_login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 

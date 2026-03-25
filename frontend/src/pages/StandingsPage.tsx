@@ -509,7 +509,7 @@ function LeagueStandingsSection({
                               }`}
                             >
                               <span>{season.display_name}</span>
-                              {isSelected ? <span className="text-base leading-none">✓</span> : null}
+                              {isSelected ? (<span className="inline-block h-2.5 w-2.5 rounded-full bg-current" aria-hidden="true" />) : null}
                             </button>
                           );
                         })}

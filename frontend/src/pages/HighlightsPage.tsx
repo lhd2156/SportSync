@@ -24,7 +24,7 @@ type LayoutMode = "REELS" | "VIDEOS";
 type HighlightCacheMap = Partial<Record<string, HighlightCacheEntry>>;
 type PosterVariant = "WIDE" | "TALL" | "SQUARE";
 
-const CACHE_KEY = "sportsync_highlights_feed_v14";
+const CACHE_KEY = "sportsync_highlights_feed_v15";
 const CACHE_TTL_MS = 45_000;
 const REQUEST_LIMIT = 120;
 const WALL_PAGE_SIZE = 9;

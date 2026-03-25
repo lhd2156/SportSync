@@ -1,157 +1,21 @@
-name: SportSync CI/CD
+name: SportSync Deploy
 
 on:
   push:
-    branches: [main, dev]
-  pull_request:
-    branches: [main, dev]
+    branches: [main, predeploy-final]
   workflow_dispatch:
 
 jobs:
-  test-backend:
-    name: Backend Tests
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_DB: sportsync_test
-          POSTGRES_USER: sportsync
-          POSTGRES_PASSWORD: test_password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        working-directory: backend
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx
-
-      - name: Run pytest suite
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql://sportsync:test_password@localhost:5432/sportsync_test
-          REDIS_URL: redis://localhost:6379
-          REDIS_CHANNEL_LIVE_SCORES: scores:live
-          JWT_SECRET: ci-test-secret-key-minimum-32-characters-long
-          JWT_ALGORITHM: HS256
-          ENVIRONMENT: test
-        run: pytest tests/ -v --tb=short
-
-  test-realtime:
-    name: Realtime Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
-      - name: Run Go tests
-        working-directory: realtime
-        run: go test ./...
-
-      - name: Build realtime service
-        working-directory: realtime
-        run: go build ./...
-
-  validate-docker:
-    name: Docker Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate docker compose
-        run: docker compose config
-
-      - name: Validate nginx config
-        run: |
-          mkdir -p /tmp/nginx-ssl
-          openssl req -x509 -nodes -newkey rsa:2048 \
-            -keyout /tmp/nginx-ssl/privkey.pem \
-            -out /tmp/nginx-ssl/fullchain.pem \
-            -days 1 \
-            -subj "/CN=localhost"
-          docker run --rm \
-            --add-host api:127.0.0.1 \
-            --add-host realtime:127.0.0.1 \
-            -v "/tmp/nginx-ssl:/etc/nginx/ssl:ro" \
-            -v "${{ github.workspace }}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
-            nginx:alpine nginx -t
-          docker run --rm \
-            --add-host api:127.0.0.1 \
-            --add-host realtime:127.0.0.1 \
-            -v "${{ github.workspace }}/nginx/nginx.http.conf:/etc/nginx/nginx.conf:ro" \
-            nginx:alpine nginx -t
-
-      - name: Build API and realtime images
-        run: |
-          docker build -t sportsync-api-ci ./backend
-          docker build -t sportsync-realtime-ci ./realtime
-          docker build -t sportsync-nginx-ci -f nginx/Dockerfile .
-
-  build-frontend:
-    name: Frontend Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: frontend
-        env:
-          VITE_GOOGLE_CLIENT_ID: placeholder
-        run: npm run build
-
   deploy:
-    name: Deploy to AWS ECS
+    name: Deploy to AWS EC2
     runs-on: ubuntu-latest
-    needs: [test-backend, test-realtime, validate-docker, build-frontend]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     env:
+      AWS_REGION: us-east-1
       STATIC_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
       VITE_ASSET_BASE_URL: ${{ secrets.VITE_ASSET_BASE_URL }}
       VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      EC2_DEPLOY_PATH: ${{ vars.EC2_DEPLOY_PATH }}
 
     steps:
       - uses: actions/checkout@v4
@@ -161,11 +25,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: ecr-login
-        uses: aws-actions/amazon-ecr-login@v2
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -185,30 +45,72 @@ jobs:
         if: env.STATIC_BUCKET != ''
         run: aws s3 sync frontend/dist "s3://$STATIC_BUCKET" --delete
 
-      - name: Build and push API image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      - name: Package application bundle
         run: |
-          docker build -t $ECR_REGISTRY/sportsync-api:latest ./backend
-          docker push $ECR_REGISTRY/sportsync-api:latest
+          set -euo pipefail
+          git archive --format=tar.gz --output "/tmp/sportsync-${GITHUB_SHA}.tar.gz" HEAD
 
-      - name: Build and push realtime image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      - name: Upload deploy bundle
         run: |
-          docker build -t $ECR_REGISTRY/sportsync-realtime:latest ./realtime
-          docker push $ECR_REGISTRY/sportsync-realtime:latest
+          set -euo pipefail
+          if [ -z "$STATIC_BUCKET" ]; then
+            echo "AWS_S3_BUCKET secret is required for EC2 deployment."
+            exit 1
+          fi
+          aws s3 cp "/tmp/sportsync-${GITHUB_SHA}.tar.gz" "s3://$STATIC_BUCKET/deployments/${GITHUB_SHA}.tar.gz"
 
-      - name: Build and push nginx image
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+      - name: Deploy to EC2 through SSM
         run: |
-          docker build -t $ECR_REGISTRY/sportsync-nginx:latest -f nginx/Dockerfile .
-          docker push $ECR_REGISTRY/sportsync-nginx:latest
+          set -euo pipefail
 
-      - name: Update ECS service
-        run: |
-          aws ecs update-service \
-            --cluster sportsync-cluster \
-            --service sportsync-service \
-            --force-new-deployment
+          if [ -z "$EC2_INSTANCE_ID" ] || [ -z "$EC2_DEPLOY_PATH" ]; then
+            echo "EC2_INSTANCE_ID and EC2_DEPLOY_PATH repository variables must be configured."
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          deploy_path = os.environ["EC2_DEPLOY_PATH"]
+          bucket = os.environ["STATIC_BUCKET"]
+          sha = os.environ["GITHUB_SHA"]
+
+          commands = [
+              "set -euo pipefail",
+              "mkdir -p /tmp/sportsync-deploy",
+              f"aws s3 cp 's3://{bucket}/deployments/{sha}.tar.gz' '/tmp/sportsync-deploy/app.tar.gz'",
+              f"mkdir -p '{deploy_path}'",
+              f"find '{deploy_path}' -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'letsencrypt' ! -name 'letsencrypt-lib' -exec rm -rf {{}} +",
+              f"tar -xzf '/tmp/sportsync-deploy/app.tar.gz' -C '{deploy_path}'",
+              f"cd '{deploy_path}'",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml build",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans",
+              "docker image prune -f >/dev/null 2>&1 || true",
+          ]
+
+          Path("/tmp/ssm-commands.json").write_text(
+              json.dumps({"commands": commands}),
+              encoding="utf-8",
+          )
+          PY
+
+          COMMAND_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters file:///tmp/ssm-commands.json \
+            --comment "Deploy SportSync ${GITHUB_SHA}" \
+            --query 'Command.CommandId' \
+            --output text)
+
+          aws ssm wait command-executed \
+            --region "$AWS_REGION" \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID"
+
+          aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID"

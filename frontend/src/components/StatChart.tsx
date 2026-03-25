@@ -1,10 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Line,
   LineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -35,17 +35,52 @@ export default function StatChart({
   series,
   valueFormatter,
 }: StatChartProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [chartSize, setChartSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return undefined;
+
+    const updateSize = () => {
+      const nextWidth = element.clientWidth;
+      const nextHeight = element.clientHeight;
+
+      setChartSize((current) => (
+        current.width === nextWidth && current.height === nextHeight
+          ? current
+          : { width: nextWidth, height: nextHeight }
+      ));
+    };
+
+    updateSize();
+
+    const observer = new ResizeObserver(() => {
+      updateSize();
+    });
+
+    observer.observe(element);
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, []);
+
+  const isChartReady = chartSize.width > 0 && chartSize.height > 0;
+
   return (
-    <div className="rounded-3xl border border-muted/15 bg-surface p-5">
+    <div className="min-w-0 rounded-3xl border border-muted/15 bg-surface p-5">
       <div className="mb-4">
         <h3 className="text-base font-semibold text-foreground">{title}</h3>
         {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
       </div>
 
-      <div className="h-64 w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          {type === "line" ? (
-            <LineChart data={data}>
+      <div ref={containerRef} className="h-64 min-w-0 w-full">
+        {isChartReady ? (
+          type === "line" ? (
+            <LineChart width={chartSize.width} height={chartSize.height} data={data}>
               <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
               <XAxis dataKey={xKey} tick={{ fill: "var(--chart-axis)", fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis
@@ -79,24 +114,24 @@ export default function StatChart({
               ))}
             </LineChart>
           ) : (
-            <BarChart data={data}>
+            <BarChart width={chartSize.width} height={chartSize.height} data={data}>
               <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
               <XAxis dataKey={xKey} tick={{ fill: "var(--chart-axis)", fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis
-                tick={{ fill: "var(--chart-axis)", fontSize: 12 }}
-                tickLine={false}
-                axisLine={false}
-                width={32}
-              />
-              <Tooltip
-                formatter={(value) =>
-                  valueFormatter ? valueFormatter(value as number | string) : String(value)
-                }
-                contentStyle={{
-                  backgroundColor: "var(--chart-tooltip-slate)",
-                  border: "1px solid var(--chart-tooltip-border)",
-                  borderRadius: "16px",
-                  color: "var(--chart-tooltip-text)",
+                  tick={{ fill: "var(--chart-axis)", fontSize: 12 }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={32}
+                />
+                <Tooltip
+                  formatter={(value) =>
+                    valueFormatter ? valueFormatter(value as number | string) : String(value)
+                  }
+                  contentStyle={{
+                    backgroundColor: "var(--chart-tooltip-slate)",
+                    border: "1px solid var(--chart-tooltip-border)",
+                    borderRadius: "16px",
+                    color: "var(--chart-tooltip-text)",
                 }}
               />
               {series.map((item) => (
@@ -109,8 +144,10 @@ export default function StatChart({
                 />
               ))}
             </BarChart>
-          )}
-        </ResponsiveContainer>
+          )
+        ) : (
+          <div className="h-full w-full" />
+        )}
       </div>
     </div>
   );

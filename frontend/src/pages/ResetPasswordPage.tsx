@@ -13,11 +13,15 @@ export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const token = (searchParams.get("token") || "").trim();
+  const emailFromQuery = (searchParams.get("email") || "").trim();
+  const usingTokenFlow = Boolean(token);
 
+  const [email, setEmail] = useState(emailFromQuery);
+  const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [isValidating, setIsValidating] = useState(true);
-  const [isValidToken, setIsValidToken] = useState(false);
+  const [isValidating, setIsValidating] = useState(usingTokenFlow);
+  const [isValidToken, setIsValidToken] = useState(!usingTokenFlow);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -36,6 +40,12 @@ export default function ResetPasswordPage() {
   const passedCount = Object.values(checks).filter(Boolean).length;
 
   useEffect(() => {
+    if (!usingTokenFlow) {
+      setIsValidating(false);
+      setIsValidToken(true);
+      return undefined;
+    }
+
     let cancelled = false;
 
     async function validateToken() {
@@ -76,7 +86,7 @@ export default function ResetPasswordPage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, usingTokenFlow]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -94,11 +104,18 @@ export default function ResetPasswordPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await apiClient.post(API.AUTH_PASSWORD_RESET_CONFIRM, {
-        token,
-        password,
-        confirm_password: confirmPassword,
-      });
+      const response = usingTokenFlow
+        ? await apiClient.post(API.AUTH_PASSWORD_RESET_CONFIRM, {
+            token,
+            password,
+            confirm_password: confirmPassword,
+          })
+        : await apiClient.post(API.AUTH_PASSWORD_RESET_CODE_CONFIRM, {
+            email,
+            code,
+            password,
+            confirm_password: confirmPassword,
+          });
       setSuccessMessage(
         response.data?.detail ||
           "Password reset successfully. Please sign in with your new password.",
@@ -121,7 +138,7 @@ export default function ResetPasswordPage() {
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
             <Logo size="lg" linkTo={ROUTES.HOME} />
-            <p className="text-muted mt-2">Create a new password</p>
+            <p className="text-muted mt-2">{usingTokenFlow ? "Create a new password" : "Enter your reset code"}</p>
           </div>
 
           <div className="bg-surface border border-muted/15 rounded-2xl p-6 shadow-lg shadow-black/20">
@@ -140,15 +157,15 @@ export default function ResetPasswordPage() {
                 </Link>
               </div>
             ) : !isValidToken ? (
-              <div className="space-y-4">
+                <div className="space-y-4">
             <div className="surface-error-card text-sm rounded-lg px-4 py-3">
-                  {error || "This reset link is invalid or expired."}
+                  {error || (usingTokenFlow ? "This reset link is invalid or expired." : "That reset code is invalid or expired.")}
                 </div>
                 <Link
                   to={ROUTES.FORGOT_PASSWORD}
                   className="inline-flex items-center justify-center w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all"
                 >
-                  Request a new reset link
+                  Request a new reset code
                 </Link>
               </div>
             ) : (
@@ -157,6 +174,42 @@ export default function ResetPasswordPage() {
             <div className="surface-error-card text-sm rounded-lg px-4 py-3">
                     {error}
                   </div>
+                )}
+
+                {!usingTokenFlow && (
+                  <>
+                    <div>
+                      <label htmlFor="reset-email" className="block text-sm text-muted mb-1">
+                        Email
+                      </label>
+                      <input
+                        id="reset-email"
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className={inputCls}
+                        placeholder="you@onsportsync.com"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="reset-code" className="block text-sm text-muted mb-1">
+                        One-time code
+                      </label>
+                      <input
+                        id="reset-code"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        required
+                        value={code}
+                        onChange={(e) => setCode(e.target.value.replace(/\s+/g, ""))}
+                        className={inputCls}
+                        placeholder="Enter the 6-digit code"
+                      />
+                    </div>
+                  </>
                 )}
 
                 <div>
@@ -218,7 +271,7 @@ export default function ResetPasswordPage() {
                   disabled={isSubmitting}
                   className="w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? "Updating password..." : "Reset password"}
+                  {isSubmitting ? "Updating password..." : usingTokenFlow ? "Reset password" : "Verify code and reset"}
                 </button>
               </form>
             )}

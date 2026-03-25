@@ -1,5 +1,5 @@
 import StaticPageShell, { StaticPageSection } from "../components/StaticPageShell";
-import { ROUTES } from "../constants";
+import { ROUTES, CONTACT_EMAILS } from "../constants";
 
 const sectionLinks = [
   { id: "overview", label: "What cookies are" },
@@ -21,13 +21,13 @@ const cookieRows = [
     name: "refresh_token",
     type: "Essential",
     purpose: "Maintains the authenticated session securely for signed-in users.",
-    duration: "Up to 7 days",
+    duration: "Up to 30 days, depending on sign-in choice",
   },
   {
     name: "session_token",
     type: "Functional",
     purpose: "Supports optional persistent sign-in behavior when a user chooses Remember Me.",
-    duration: "Up to 7 days",
+    duration: "Up to 30 days",
   },
   {
     name: "cookie_consent",
@@ -180,8 +180,8 @@ export default function CookiePolicyPage() {
       >
         <p className="text-sm leading-7 text-muted">
           For questions about this Cookie Policy or SportSync's privacy practices, contact{" "}
-          <a href="mailto:privacy@sportsync.app" className="text-accent transition-colors hover:text-accent-hover">
-            privacy@sportsync.app
+          <a href={`mailto:${CONTACT_EMAILS.PRIVACY}`} className="text-accent transition-colors hover:text-accent-hover">
+            {CONTACT_EMAILS.PRIVACY}
           </a>
           .
         </p>

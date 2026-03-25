@@ -601,3 +601,21 @@ def test_parse_espn_event_handles_schedule_payload_scores():
     assert parsed["awayScore"] == 117
     assert parsed["homeBadge"] == "https://example.com/cha.png"
     assert parsed["awayBadge"] == "https://example.com/atl.png"
+
+
+def test_router_fallback_prediction_values_for_missing_model():
+    from routers.predictions import _fallback_prediction_values
+
+    class DummyGame:
+        league = "NFL"
+        status = "live"
+        home_score = 21
+        away_score = 14
+
+    payload = _fallback_prediction_values(DummyGame())
+    assert payload["model_version"] == "fallback_v1"
+    assert 0.0 <= payload["home_win_prob"] <= 1.0
+    assert 0.0 <= payload["away_win_prob"] <= 1.0
+    assert abs(payload["home_win_prob"] + payload["away_win_prob"] - 1.0) < 0.001
+    assert payload["confidence"] >= 0.5
+    assert payload["factors"]

@@ -7,7 +7,7 @@ import Footer from "../components/Footer";
 
 type PasswordResetRequestResponse = {
   detail?: string;
-  dev_reset_url?: string;
+  dev_reset_code?: string;
 };
 
 export default function ForgotPasswordPage() {
@@ -15,7 +15,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [devResetUrl, setDevResetUrl] = useState("");
+  const [devResetCode, setDevResetCode] = useState("");
 
   const inputCls =
     "w-full bg-background border border-muted/20 text-foreground rounded-lg px-4 py-2.5 focus:border-accent focus:ring-1 focus:ring-accent/30 focus:outline-none transition-all placeholder:text-muted/40";
@@ -32,7 +32,7 @@ export default function ForgotPasswordPage() {
         response.data.detail ||
           "If an account exists for that email, reset instructions will be sent.",
       );
-      setDevResetUrl(response.data.dev_reset_url || "");
+      setDevResetCode(response.data.dev_reset_code || "");
     } catch (err: unknown) {
       const apiError = err as { response?: { data?: { detail?: string } } };
       setError(apiError.response?.data?.detail || "We could not start the reset flow.");
@@ -57,44 +57,42 @@ export default function ForgotPasswordPage() {
                   {successMessage}
                 </div>
 
-                {devResetUrl ? (
+                {devResetCode ? (
                   <div className="bg-background border border-muted/15 rounded-xl p-4 space-y-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">Development shortcut</p>
                       <p className="text-sm text-muted mt-1">
-                        Local development is using a direct reset link instead of email delivery.
+                        Local development is showing the one-time code directly instead of sending email.
                       </p>
                     </div>
-                    <a
-                      href={devResetUrl}
-                      className="inline-flex items-center justify-center w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all"
-                    >
-                      Continue to reset password
-                    </a>
+                    <div className="rounded-xl border border-muted/15 bg-surface px-4 py-3 text-center">
+                      <div className="text-xs uppercase tracking-[0.24em] text-muted">One-time code</div>
+                      <div className="mt-2 text-2xl font-semibold tracking-[0.32em] text-foreground">{devResetCode}</div>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-sm text-muted">
-                    Check your email for the reset link, then come back here when you are ready.
+                    Check your email for the one-time code, then continue to the reset form.
                   </p>
                 )}
 
                 <div className="flex items-center justify-between gap-3">
+                  <Link
+                    to={`${ROUTES.RESET_PASSWORD}?email=${encodeURIComponent(email)}`}
+                    className="flex-1 py-3 text-center bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all"
+                  >
+                    Enter reset code
+                  </Link>
                   <button
                     type="button"
                     onClick={() => {
                       setSuccessMessage("");
-                      setDevResetUrl("");
+                      setDevResetCode("");
                     }}
                     className="flex-1 py-3 border border-muted/20 text-foreground-base hover:border-accent/40 rounded-lg transition-all"
                   >
                     Try another email
                   </button>
-                  <Link
-                    to={ROUTES.LOGIN}
-                    className="flex-1 py-3 text-center bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all"
-                  >
-                    Back to sign in
-                  </Link>
                 </div>
               </div>
             ) : (
@@ -121,7 +119,7 @@ export default function ForgotPasswordPage() {
                 </div>
 
                 <p className="text-sm text-muted leading-relaxed">
-                  We&apos;ll send reset instructions if the account exists. This keeps account ownership private.
+                  We&apos;ll email a one-time reset code if the account exists. This keeps account ownership private.
                 </p>
 
                 <button
@@ -129,7 +127,7 @@ export default function ForgotPasswordPage() {
                   disabled={isSubmitting}
                   className="w-full py-3 bg-accent hover:bg-accent-hover text-white font-medium rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? "Sending reset link..." : "Send reset link"}
+                  {isSubmitting ? "Sending reset code..." : "Send reset code"}
                 </button>
               </form>
             )}

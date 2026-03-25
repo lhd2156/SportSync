@@ -23,7 +23,7 @@ const LEAGUE_ORDER: Record<string, number> = {
   NHL: 3, nhl: 3, Hockey: 3,
   EPL: 4, epl: 4, "English Premier League": 4, Soccer: 4,
 };
-const TEAM_DIRECTORY_CACHE_KEY = "sportsync_team_directory_v1";
+const TEAM_DIRECTORY_CACHE_KEY = "sportsync_team_directory_v2";
 const SAVED_TEAM_DIRECTORY_CACHE_KEY = "sportsync_saved_team_directory_v1";
 
 function readSessionJson<T>(key: string, fallback: T): T {
@@ -216,10 +216,18 @@ export default function Teams() {
           </div>
 
           {isLoading ? (
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="h-48 animate-pulse rounded-3xl border border-muted/15 bg-surface" />
-              ))}
+            <div aria-live="polite" className="space-y-4">
+              <div className="rounded-3xl border border-muted/15 bg-surface px-5 py-4">
+                <p className="text-sm font-medium text-foreground">Loading teams...</p>
+                <p className="mt-1 text-xs text-muted">
+                  Pulling the latest club directory and your follow status.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="h-48 animate-pulse rounded-3xl border border-muted/15 bg-surface" />
+                ))}
+              </div>
             </div>
           ) : filteredTeams.length === 0 ? (
             <div className="rounded-3xl border border-muted/15 bg-surface px-6 py-16 text-center">

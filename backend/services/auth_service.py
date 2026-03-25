@@ -184,7 +184,7 @@ def reset_failed_logins(db: Session, user: User) -> None:
 
 
 def store_session_in_redis(redis_client, token: str, user_id: str) -> None:
-    """Store a Remember Me session token in Redis with a 7-day TTL."""
+    """Store a Remember Me session token in Redis with a 30-day TTL."""
     key = f"{REDIS_PREFIX_SESSION}{token}"
     redis_client.setex(key, CACHE_TTL_SESSION, str(user_id))
 
