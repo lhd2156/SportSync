@@ -17,6 +17,7 @@ FROM nginx:alpine
 
 COPY nginx/nginx.conf /etc/nginx/templates/nginx.https.conf
 COPY nginx/nginx.http.conf /etc/nginx/templates/nginx.http.conf
+COPY nginx/includes/ /etc/nginx/includes/
 COPY nginx/10-select-config.sh /docker-entrypoint.d/40-select-config.sh
 RUN chmod +x /docker-entrypoint.d/40-select-config.sh
 COPY --from=frontend-build /app/frontend/dist /usr/share/nginx/html
