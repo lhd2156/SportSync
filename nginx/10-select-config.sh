@@ -6,6 +6,9 @@ HTTP_TEMPLATE="/etc/nginx/templates/nginx.http.conf"
 TARGET_CONFIG="/etc/nginx/nginx.conf"
 ALLOWLIST_DIR="/etc/nginx/includes"
 ALLOWLIST_FILE="$ALLOWLIST_DIR/api-allowlist.conf"
+TLS_DOMAIN="${TLS_DOMAIN:-onsportsync.com}"
+TLS_FULLCHAIN="/etc/letsencrypt/live/${TLS_DOMAIN}/fullchain.pem"
+TLS_PRIVKEY="/etc/letsencrypt/live/${TLS_DOMAIN}/privkey.pem"
 
 mkdir -p "$ALLOWLIST_DIR"
 
@@ -27,7 +30,7 @@ else
 EOF
 fi
 
-if [ -f /etc/nginx/ssl/fullchain.pem ] && [ -f /etc/nginx/ssl/privkey.pem ]; then
+if [ -f "$TLS_FULLCHAIN" ] && [ -f "$TLS_PRIVKEY" ]; then
   echo "Using HTTPS nginx configuration"
   cp "$HTTPS_TEMPLATE" "$TARGET_CONFIG"
 else

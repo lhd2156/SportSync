@@ -4,7 +4,7 @@
 services:
   # Production API runs as non-root with no volume mounts
   api:
-    volumes: []
+    volumes: !override []
     env_file:
       - ./.env
     ports: !override
@@ -22,7 +22,6 @@ services:
       AWS_S3_PUBLIC_BASE_URL: ${AWS_S3_PUBLIC_BASE_URL:-}
       AWS_S3_USE_PATH_STYLE: ${AWS_S3_USE_PATH_STYLE:-false}
     restart: always
-    user: "1000:1000"
 
   # Production realtime runs as non-root
   realtime:
@@ -37,7 +36,6 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       PRODUCTION_DOMAIN: ${PRODUCTION_DOMAIN}
     restart: always
-    user: "1000:1000"
 
   # Production Nginx serves SSL and frontend static build
   nginx:
@@ -45,7 +43,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./letsencrypt:/etc/letsencrypt:ro
+    environment:
+      TLS_DOMAIN: ${TLS_DOMAIN:-onsportsync.com}
     restart: always
 
   # Production PostgreSQL with persistent volume and restart policy

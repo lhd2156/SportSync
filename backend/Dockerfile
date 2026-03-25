@@ -12,7 +12,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN chmod +x /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh \
+    && mkdir -p /app/uploads \
+    && chown -R sportsync:sportsync /app
 
 # Switch to non-root user before running
 USER sportsync
