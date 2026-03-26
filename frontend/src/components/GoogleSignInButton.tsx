@@ -10,7 +10,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const DEFAULT_GOOGLE_CLIENT_ID = "101549539164-emespsvci0rkc8p3ffa8k7ckh8svnsl6.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || DEFAULT_GOOGLE_CLIENT_ID;
 const DEFAULT_GOOGLE_ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
