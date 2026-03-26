@@ -431,7 +431,7 @@ function getActivityRecency(item: ActivityItem): { period: number; progress: num
     }
   }
 
-  if (["EPL", "MLS"].includes(item.league)) {
+  if (item.league === "EPL") {
     if (combined.includes("match ends") || combined.includes("game end")) {
       return { period: 99, progress: 999 };
     }

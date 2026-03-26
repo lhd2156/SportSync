@@ -67,7 +67,6 @@ LEAGUES = {
     "NBA":  ("basketball",  "nba",  4387),
     "MLB":  ("baseball",    "mlb",  4424),
     "NHL":  ("hockey",      "nhl",  4380),
-    "MLS":  ("soccer",      "usa.1", 4346),
     "EPL":  ("soccer",      "eng.1", 4328),
 }
 SPORTSDB_SPORTS = {
@@ -75,7 +74,6 @@ SPORTSDB_SPORTS = {
     "NBA": "Basketball",
     "MLB": "Baseball",
     "NHL": "Ice Hockey",
-    "MLS": "Soccer",
     "EPL": "Soccer",
 }
 HIGHLIGHT_IMAGE_ALLOWED_HOSTS = (
@@ -2863,7 +2861,6 @@ TEAM_SEARCH_LEAGUES = {
     "NBA": "NBA",
     "MLB": "MLB",
     "NHL": "NHL",
-    "MLS": "MLS",
     "EPL": "English Premier League",
 }
 
@@ -3041,7 +3038,7 @@ def _activity_recency_rank(play: dict) -> tuple[int, float]:
             seconds = float(period_seconds_only_match.group(2))
             return (period, seconds)
 
-    if league in {"EPL", "MLS"}:
+    if league == "EPL":
         if "match ends" in combined or "game end" in combined:
             return (99, 999.0)
         if "second half ends" in combined:
@@ -3795,7 +3792,7 @@ def _parse_espn_event_as_activity(event: dict, league_key: str) -> dict:
 
 @router.get("/espn/scoreboard", response_model=dict[str, Any])
 async def espn_scoreboard(
-    league: str = Query(description="League key: NFL, NBA, MLB, NHL, MLS, EPL"),
+    league: str = Query(description="League key: NFL, NBA, MLB, NHL, EPL"),
     d: str = Query(default=None, description="Date: YYYYMMDD format"),
 ):
     """
@@ -3827,7 +3824,7 @@ async def espn_all_leagues(
 ):
     """
     Fetch ESPN scoreboard data for ALL supported leagues on a date.
-    Returns games grouped by league, ordered: NFL, NBA, MLB, NHL, MLS, EPL.
+    Returns games grouped by league, ordered: NFL, NBA, MLB, NHL, EPL.
     Uses parallel fetching for performance.
     """
     date_param = d or datetime.now().strftime("%Y%m%d")
@@ -3872,7 +3869,7 @@ async def espn_featured():
     upcoming_items: list[dict] = []
 
     today = datetime.now().strftime("%Y%m%d")
-    league_keys = ["NBA", "NHL", "NFL", "MLB", "MLS", "EPL"]
+    league_keys = ["NBA", "NHL", "NFL", "MLB", "EPL"]
 
     async def fetch_league(key: str):
         sport, espn_league, _ = LEAGUES[key]
@@ -3934,7 +3931,6 @@ async def espn_news(
         "NBA": "basketball/nba",
         "MLB": "baseball/mlb",
         "NHL": "hockey/nhl",
-        "MLS": "soccer/usa.1",
         "EPL": "soccer/eng.1",
     }
 
@@ -3983,7 +3979,7 @@ async def espn_news(
                         title_lower = title.lower()
                         for tag, keywords in [("NFL", ["nfl", "football"]), ("NBA", ["nba", "basketball"]),
                                               ("MLB", ["mlb", "baseball"]), ("NHL", ["nhl", "hockey"]),
-                                              ("MLS", ["mls", "soccer"]), ("EPL", ["premier league", "epl"])]:
+                                              ("EPL", ["premier league", "epl", "soccer"])]:
                             if any(kw in title_lower for kw in keywords):
                                 detected_league = tag
                                 break
@@ -4025,7 +4021,6 @@ async def espn_news(
             "MLB": 2,
             "NHL": 3,
             "EPL": 4,
-            "MLS": 5,
             "": 9,
         }
 
@@ -4443,7 +4438,7 @@ def _is_junk_play(text: str) -> bool:
     for prefix in _JUNK_STARTSWITH:
         if t.startswith(prefix):
             return True
-    # MLS score-only lines
+# Soccer score-only lines
     import re
     if _re.search(r"\b(first|second)\s+half\s+begins[.!]?$", t):
         return False
@@ -4502,7 +4497,7 @@ def _is_junk_play(text: str) -> bool:
 # ESPN headshot URL uses league abbr, not sport name
 _HEADSHOT_SPORT = {
     "NBA": "nba", "NHL": "nhl", "NFL": "nfl",
-    "MLB": "mlb", "MLS": "soccer", "EPL": "soccer",
+    "MLB": "mlb", "EPL": "soccer",
 }
 
 def _build_espn_headshot_url(athlete_id: str, hs_sport: str) -> str:
@@ -4629,7 +4624,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
         if drive_plays:
             plays_raw = drive_plays
 
-    if league_key in ("EPL", "MLS") and not plays_raw:
+    if league_key == "EPL" and not plays_raw:
         key_events = data.get("keyEvents", [])
         commentary = data.get("commentary", [])
         key_event_map = {
@@ -4696,7 +4691,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
             plays_raw = synthesized
 
     # ── Soccer uses keyEvents + commentary instead of plays ──────────
-    if league_key in ("EPL", "MLS") and not plays_raw:
+    if league_key == "EPL" and not plays_raw:
         key_events = data.get("keyEvents", [])
         commentary = data.get("commentary", [])
 
@@ -5215,7 +5210,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
 
     def _chronological_clock_progress(p) -> float:
         seconds = _clock_secs(p)
-        if league_key == "NHL" or league_key in ("EPL", "MLS"):
+        if league_key == "NHL" or league_key == "EPL":
             return seconds
         return -seconds
 
@@ -5587,8 +5582,8 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
 
     formatted = []
     at_bat_tracker: dict[str, dict] = {}  # event_id → {pitcher_name, pitcher_id, batter_name, batter_id}
-    soccer_running_home_score = 0 if league_key in ("EPL", "MLS") else None
-    soccer_running_away_score = 0 if league_key in ("EPL", "MLS") else None
+    soccer_running_home_score = 0 if league_key == "EPL" else None
+    soccer_running_away_score = 0 if league_key == "EPL" else None
     for play in plays_raw:
         play_id = str(play.get("id", ""))
         text = play.get("text", "")
@@ -5603,7 +5598,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
         score_val = play.get("scoreValue", 0)
         explicit_away_score = _coerce_activity_score(play.get("awayScore"))
         explicit_home_score = _coerce_activity_score(play.get("homeScore"))
-        if league_key in ("EPL", "MLS"):
+        if league_key == "EPL":
             if explicit_home_score is not None and explicit_away_score is not None:
                 soccer_running_home_score = explicit_home_score
                 soccer_running_away_score = explicit_away_score
@@ -5748,7 +5743,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
             text_for_matching, _re.IGNORECASE
         )
 
-        if league_key in ("EPL", "MLS"):
+        if league_key == "EPL":
             soccer_goal_match = _re.match(
                 r"^Goal!\s+[^.]+\.\s+(.+?)\s+\((.+?)\)\b",
                 text_for_matching,
@@ -5965,7 +5960,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
             if resolved_assister:
                 assister_name_from_text = resolved_assister["name"]
                 assister_id_from_text = resolved_assister["id"]
-        if league_key in ("EPL", "MLS"):
+        if league_key == "EPL":
             soccer_assist_match = _re.search(r"\bAssisted by (.+?)(?:\.|$)", text, _re.IGNORECASE)
             if soccer_assist_match:
                 assist_candidate = soccer_assist_match.group(1).strip()
@@ -6152,9 +6147,9 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
                     play_team_logo = play_team_logo or pt.get("logo", "")
 
         # Set team info from actor's team if still missing
-        if aid1 and aid1 in player_teams and (not play_team_logo or league_key in ("NFL", "EPL", "MLS")):
+        if aid1 and aid1 in player_teams and (not play_team_logo or league_key in ("NFL", "EPL")):
             pt = player_teams[aid1]
-            if league_key in ("NFL", "EPL", "MLS"):
+            if league_key in ("NFL", "EPL"):
                 play_team_name = pt.get("name", "") or play_team_name
                 play_team_abbr = pt.get("abbr", "") or play_team_abbr
                 play_team_logo = pt.get("logo", "") or play_team_logo
@@ -6238,7 +6233,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
                 ps = player_stats[aid1]
                 if league_key == "NFL":
                     athlete_stats_str = _format_nfl_stats_precise(ps, text)
-                elif league_key in ("EPL", "MLS"):
+                elif league_key == "EPL":
                     athlete_stats_str = _format_epl_stats(ps)
                 elif league_key == "MLB":
                     parts = []
@@ -6258,12 +6253,12 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
             period_label = f"Q{period}" if period <= 4 else f"OT{period - 4}"
         elif league_key == "NHL":
             period_label = f"P{period}" if period <= 3 else f"OT{period - 3}"
-        elif league_key in ("MLS", "EPL"):
+        elif league_key == "EPL":
             period_label = clock if clock.endswith("'") else f"{clock}'" if clock else ""
         else:
             period_label = f"Q{period}"
 
-        if league_key in ("MLS", "EPL"):
+        if league_key == "EPL":
             if period_label:
                 detail = period_label
             else:
@@ -6395,7 +6390,7 @@ async def espn_headshot(
         for candidate in await _build_epl_headshot_candidates(clean_name, clean_team):
             add(candidate)
 
-    if clean_name and clean_league not in {"NFL", "NBA", "NHL", "MLB", "EPL", "MLS"}:
+    if clean_name and clean_league not in {"NFL", "NBA", "NHL", "MLB", "EPL"}:
         for candidate in await _build_sportsdb_image_candidates(clean_name, clean_team, clean_league):
             add(candidate)
         for candidate in await _build_sportsdb_team_roster_candidates(clean_name, clean_team):
@@ -6468,7 +6463,7 @@ async def espn_activity(
     date: str = Query(default=None, description="Date in YYYYMMDD format (defaults to today)"),
     offset: int = Query(default=0, description="Offset for pagination (0-based)"),
     limit: int = Query(default=500, description="Max plays per response"),
-    league: str = Query(default=None, description="Filter by league key (e.g. NBA, EPL, MLS)"),
+    league: str = Query(default=None, description="Filter by league key (e.g. NBA, EPL)"),
 ):
     """
     Activity feed — full play-by-play timeline using ESPN summary API.
@@ -7066,7 +7061,7 @@ async def espn_game_detail(
     requested_league = _resolve_league_key(league) if league else None
     league_candidates = [requested_league] if requested_league else []
     league_candidates.extend([
-        key for key in ["NBA", "NHL", "NFL", "MLB", "MLS", "EPL"] if key not in league_candidates
+        key for key in ["NBA", "NHL", "NFL", "MLB", "EPL"] if key not in league_candidates
     ])
 
     for key in league_candidates:
@@ -7196,7 +7191,7 @@ async def espn_game_detail(
         derived_game_leaders = []
         if league_key == "MLB":
             derived_game_leaders, derived_team_leaders = _derive_mlb_game_detail_leaders(pbp_data, sport)
-        elif league_key in {"EPL", "MLS"}:
+        elif league_key == "EPL":
             derived_game_leaders, derived_team_leaders = _derive_soccer_game_detail_team_stat_leaders(pbp_data)
 
         game_leaders = _game_detail_merge_leaders(game_leaders, derived_game_leaders)

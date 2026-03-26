@@ -14,6 +14,7 @@ jobs:
       STATIC_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
       VITE_ASSET_BASE_URL: ${{ secrets.VITE_ASSET_BASE_URL }}
       VITE_GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_ALLOWED_ORIGINS: ${{ vars.VITE_GOOGLE_ALLOWED_ORIGINS }}
       EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
       EC2_DEPLOY_PATH: ${{ vars.EC2_DEPLOY_PATH }}
 
@@ -39,6 +40,7 @@ jobs:
         run: |
           npm ci
           if [ -z "$VITE_GOOGLE_CLIENT_ID" ]; then export VITE_GOOGLE_CLIENT_ID=placeholder; fi
+          if [ -z "$VITE_GOOGLE_ALLOWED_ORIGINS" ]; then export VITE_GOOGLE_ALLOWED_ORIGINS=https://onsportsync.com,https://www.onsportsync.com; fi
           npm run build
 
       - name: Sync static assets to S3

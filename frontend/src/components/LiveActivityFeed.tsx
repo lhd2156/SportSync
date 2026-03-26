@@ -841,7 +841,7 @@ const HeadshotImg = memo(function HeadshotImg({
     };
   }, [imageSources, sourceKey]);
 
-  const isSoccerLeague = league === "EPL" || league === "MLS";
+  const isSoccerLeague = league === "EPL";
   const imageSizingClass = isSoccerLeague
     ? "scale-[1.05] object-cover object-top"
     : "scale-[1.16] object-cover object-center";

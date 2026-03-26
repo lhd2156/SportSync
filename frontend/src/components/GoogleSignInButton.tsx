@@ -11,6 +11,12 @@ import { useAuth } from "../context/AuthContext";
 import { ROUTES } from "../constants";
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const DEFAULT_GOOGLE_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://onsportsync.com",
+  "https://www.onsportsync.com",
+];
 const GOOGLE_ALLOWED_ORIGINS = String(import.meta.env.VITE_GOOGLE_ALLOWED_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -34,7 +40,11 @@ function googleSignInAllowedForCurrentOrigin(): boolean {
     return false;
   }
 
-  return GOOGLE_ALLOWED_ORIGINS.includes(currentOrigin);
+  const allowedOrigins = GOOGLE_ALLOWED_ORIGINS.length > 0
+    ? GOOGLE_ALLOWED_ORIGINS
+    : DEFAULT_GOOGLE_ALLOWED_ORIGINS;
+
+  return allowedOrigins.includes(currentOrigin);
 }
 
 export const GOOGLE_SIGN_IN_AVAILABLE = googleSignInAllowedForCurrentOrigin();

@@ -13,14 +13,14 @@ from constants import SUPPORTED_SPORTS
 
 
 def test_supported_sports_list():
-    """All 6 expected sports are in the supported sports list."""
-    expected = {"NFL", "NBA", "MLB", "NHL", "MLS", "EPL"}
+    """All 5 expected sports are in the supported sports list."""
+    expected = {"NFL", "NBA", "MLB", "NHL", "EPL"}
     assert set(SUPPORTED_SPORTS) == expected
 
 
 def test_supported_sports_count():
-    """Exactly 6 sports supported in v1."""
-    assert len(SUPPORTED_SPORTS) == 6
+    """Exactly 5 sports supported in v1."""
+    assert len(SUPPORTED_SPORTS) == 5
 
 
 def test_no_minor_leagues():
