@@ -136,9 +136,9 @@ jobs:
               "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio",
               "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api realtime",
               "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d nginx",
-              "curl -fsS http://127.0.0.1:8001/api/health >/dev/null",
-              "curl -fsS http://127.0.0.1:8081/health >/dev/null",
-              "curl -kfsS https://127.0.0.1/ -H 'Host: onsportsync.com' >/dev/null",
+              "for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:8001/api/health >/dev/null && break; echo \"Waiting for api health ($attempt/30)...\"; sleep 2; if [ \"$attempt\" -eq 30 ]; then docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=120 api || true; exit 1; fi; done",
+              "for attempt in $(seq 1 30); do curl -fsS http://127.0.0.1:8081/health >/dev/null && break; echo \"Waiting for realtime health ($attempt/30)...\"; sleep 2; if [ \"$attempt\" -eq 30 ]; then docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=120 realtime || true; exit 1; fi; done",
+              "for attempt in $(seq 1 45); do curl -kfsS --connect-timeout 3 --max-time 10 https://127.0.0.1/login -H 'Host: onsportsync.com' >/dev/null && break; echo \"Waiting for nginx HTTPS health ($attempt/45)...\"; sleep 2; if [ \"$attempt\" -eq 45 ]; then docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=160 nginx || true; exit 1; fi; done",
               "docker compose -f docker-compose.yml -f docker-compose.prod.yml ps -a",
               "docker image prune -f >/dev/null 2>&1 || true",
           ]
