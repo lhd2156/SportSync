@@ -92,10 +92,10 @@ class TestConstants:
         assert RATE_LIMIT_REGISTER_MAX == 5
 
     def test_supported_sports(self):
-        """All 6 leagues must be supported."""
+        """All 5 leagues must be supported."""
         from constants import SUPPORTED_SPORTS
-        assert len(SUPPORTED_SPORTS) == 6
-        for league in ["NFL", "NBA", "MLB", "NHL", "MLS", "EPL"]:
+        assert len(SUPPORTED_SPORTS) == 5
+        for league in ["NFL", "NBA", "MLB", "NHL", "EPL"]:
             assert league in SUPPORTED_SPORTS
 
     def test_bcrypt_cost_factor(self):

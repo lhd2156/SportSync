@@ -45,7 +45,7 @@ REDIS_PREFIX_PASSWORD_RESET = "password-reset:"
 REDIS_CHANNEL_LIVE_SCORES = "scores:live"
 
 # Supported Sports and Leagues
-SUPPORTED_SPORTS = ["NFL", "NBA", "MLB", "NHL", "MLS", "EPL"]
+SUPPORTED_SPORTS = ["NFL", "NBA", "MLB", "NHL", "EPL"]
 
 # Minimum age requirement enforced both client-side and server-side
 MINIMUM_AGE_YEARS = 18

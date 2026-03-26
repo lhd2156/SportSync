@@ -503,7 +503,7 @@ const GameHeadshotImg = memo(function GameHeadshotImg({
     };
   }, [imageSources, sourceKey, hasOfficialSource]);
 
-  const isSoccerLeague = league === "EPL" || league === "MLS";
+  const isSoccerLeague = league === "EPL";
   const imageSizingClass =
     renderMode === "badge"
       ? "h-full w-full object-contain p-[14%]"
@@ -562,7 +562,6 @@ const DIRECT_ESPN_SUMMARY_PATHS: Record<string, string> = {
   NBA: "basketball/nba",
   MLB: "baseball/mlb",
   NHL: "hockey/nhl",
-  MLS: "soccer/usa.1",
   EPL: "soccer/eng.1",
 };
 
@@ -1334,7 +1333,7 @@ async function deriveFallbackLeaders(summary: EspnSummary, league: string): Prom
   if (league === "NBA") {
     return deriveNbaFallbackLeaders(summary);
   }
-  if (league === "EPL" || league === "MLS") {
+  if (league === "EPL") {
     const trackedStats = [
       { name: "possessionPct", label: "Possession", suffix: "%" },
       { name: "totalShots", label: "Shots", suffix: "" },
@@ -2149,7 +2148,6 @@ const BOX_SCORE_LABEL_PREFERENCES: Record<string, string[]> = {
   MLB: ["H-AB", "AB", "R", "H", "RBI", "HR", "BB", "K", "#P", "AVG", "OBP", "SLG", "IP", "ER", "WHIP"],
   NHL: ["G", "A", "PTS", "SOG", "TOI", "+/-", "FW", "FL", "FO%", "PIM", "HT", "TK", "BS"],
   EPL: ["Possession", "SHOTS", "ON GOAL", "Saves", "Fouls", "Corner Kicks", "Accurate Passes", "Passes", "Pass Completion %"],
-  MLS: ["Possession", "SHOTS", "ON GOAL", "Saves", "Fouls", "Corner Kicks", "Accurate Passes", "Passes", "Pass Completion %"],
 };
 
 function buildStableBoxScoreLabels(boxScore: BoxScoreTeam[], league: string): string[] {
