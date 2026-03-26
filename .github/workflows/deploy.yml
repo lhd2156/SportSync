@@ -39,7 +39,7 @@ jobs:
         working-directory: frontend
         run: |
           npm ci
-          if [ -z "$VITE_GOOGLE_CLIENT_ID" ]; then export VITE_GOOGLE_CLIENT_ID=placeholder; fi
+          if [ -z "$VITE_GOOGLE_CLIENT_ID" ]; then export VITE_GOOGLE_CLIENT_ID=101549539164-emespsvci0rkc8p3ffa8k7ckh8svnsl6.apps.googleusercontent.com; fi
           if [ -z "$VITE_GOOGLE_ALLOWED_ORIGINS" ]; then export VITE_GOOGLE_ALLOWED_ORIGINS=https://onsportsync.com,https://www.onsportsync.com; fi
           npm run build
 
