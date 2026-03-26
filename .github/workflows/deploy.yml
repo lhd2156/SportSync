@@ -132,8 +132,14 @@ jobs:
               f"find '{deploy_path}' -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'letsencrypt' ! -name 'letsencrypt-lib' -exec rm -rf {{}} +",
               f"tar -xzf '/tmp/sportsync-deploy/app.tar.gz' -C '{deploy_path}'",
               f"cd '{deploy_path}'",
-              "docker compose -f docker-compose.yml -f docker-compose.prod.yml build",
-              "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml build api realtime nginx",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d postgres redis minio",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api realtime",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d nginx",
+              "curl -fsS http://127.0.0.1:8001/api/health >/dev/null",
+              "curl -fsS http://127.0.0.1:8081/health >/dev/null",
+              "curl -kfsS https://127.0.0.1/ -H 'Host: onsportsync.com' >/dev/null",
+              "docker compose -f docker-compose.yml -f docker-compose.prod.yml ps -a",
               "docker image prune -f >/dev/null 2>&1 || true",
           ]
 
