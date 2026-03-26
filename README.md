@@ -1,90 +1,198 @@
 # SportSync
 
-A production-grade real-time multi-sport web platform delivering live scores, personalized feeds, and ML-powered game predictions across NFL, NBA, MLB, NHL, MLS, and EPL.
+SportSync is a real-time multi-sport web application for following live games, saved teams, highlights, standings, and matchup predictions in one place.
 
-## Version
+Live production site:
 
-v0.1 -- The start of a new beginning.
+- [https://onsportsync.com](https://onsportsync.com)
 
-## Architecture
+## Current Scope
 
-SportSync uses a microservices architecture with two independent backend services communicating through a shared Redis layer.
+SportSync currently supports:
 
-| Service | Tech | Responsibility |
-|---------|------|---------------|
-| API Service | Python + FastAPI | Auth, REST API, ML predictions, data logic |
-| Realtime Service | Go + Gin | WebSocket connections, live score streaming |
-| Cache / Broker | Redis | Shared cache, pub/sub, sessions, rate limiting |
-| Gateway | Nginx | Reverse proxy, SSL termination, security headers |
-| Frontend | React + TypeScript | Single-page application, Tailwind CSS |
-| Database | PostgreSQL | Persistent data storage |
+- NFL
+- NBA
+- MLB
+- NHL
+- EPL
+
+Core product areas:
+
+- Email/password auth and Google sign-in
+- Personalized dashboard with saved teams
+- Live scores and activity feed
+- Team pages, standings, and game detail views
+- ML-powered win probability predictions
+- Password reset with 6-digit verification codes
 
 ## Tech Stack
 
-TypeScript, Python, Go, PostgreSQL, Redis, Docker, Nginx, AWS ECS, AWS S3, GitHub Actions, JWT, Google OAuth 2.0, scikit-learn, Pandas, NumPy, FastAPI, Gin, SQLAlchemy, Alembic, Pytest, React, Tailwind CSS, Axios, React Query, Recharts.
+### Frontend
 
-## Getting Started
+- React
+- TypeScript
+- Tailwind CSS
+- Axios
+- React Query
+- Recharts
+
+### Backend
+
+- FastAPI
+- Python
+- SQLAlchemy
+- Alembic
+- PostgreSQL
+- Redis
+
+### Realtime
+
+- Go
+- Gin
+- Gorilla WebSocket
+
+### ML
+
+- scikit-learn
+- Pandas
+- NumPy
+
+### Infrastructure
+
+- Docker
+- Docker Compose
+- Nginx
+- GitHub Actions
+- AWS EC2
+- AWS S3
+- Amazon SES
+
+## Architecture
+
+SportSync runs as a small multi-service stack:
+
+| Service | Responsibility |
+| --- | --- |
+| `frontend` | React app for the full user experience |
+| `backend` | FastAPI REST API, auth, data logic, ML endpoints |
+| `realtime` | Go WebSocket service for live score updates |
+| `postgres` | Primary application database |
+| `redis` | caching, rate limiting, sessions, pub/sub |
+| `nginx` | reverse proxy, HTTPS, security headers |
+
+FastAPI and Go do not call each other directly. Redis is the bridge for live score publishing.
+
+## Local Development
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Node.js 18+
+- Node.js 20+
 - Python 3.11+
 - Go 1.21+
+- Docker Desktop
 
-### Local Development
+### 1. Create environment files
+
+Copy the root example file and fill in the values you need:
 
 ```bash
-# Copy environment template and fill in values
 cp .env.example .env
-
-# Start all services
-docker-compose up -d
-
-# Run database migrations
-cd backend && alembic upgrade head
-
-# Start frontend dev server
-cd frontend && npm install && npm run dev
 ```
 
-### Services
+For frontend-only local overrides, create `frontend/.env.development` if needed.
 
-| Service | Local URL |
-|---------|----------|
-| Frontend | http://localhost:5173 |
-| API (FastAPI) | http://localhost:8000 |
-| WebSocket (Go) | ws://localhost:8080 |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
+### 2. Start the local services
 
-## Branch Strategy
-
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production only. Protected after init commit. |
-| `dev` | Integration branch. All features land here first. |
-| `feature/*` | One branch per feature. |
-| `fix/*` | One branch per bug fix. |
-
-Workflow: `feature/*` -> PR into `dev` -> merge -> `dev` -> PR into `main` -> deploy
-
-## Project Structure
-
+```bash
+docker compose up -d
 ```
-sportsync/
-  backend/          # Python FastAPI service
-  realtime/         # Go Gin WebSocket service
-  frontend/         # React TypeScript application
-  nginx/            # Reverse proxy and SSL config
+
+### 3. Run database migrations
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+### 4. Start the frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### 5. Start the backend directly (optional)
+
+If you want to run the FastAPI app outside Docker:
+
+```bash
+cd backend
+python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+## Default Local URLs
+
+| Service | URL |
+| --- | --- |
+| Frontend | [http://localhost:5173](http://localhost:5173) |
+| Backend API | [http://localhost:8000](http://localhost:8000) |
+| Realtime WS | `ws://localhost:8080/ws/scores` |
+| PostgreSQL | `localhost:5432` |
+| Redis | `localhost:6379` |
+
+## Production Notes
+
+Production currently runs on:
+
+- `onsportsync.com`
+- HTTPS via Let's Encrypt
+- Docker Compose on AWS EC2
+
+Important production services:
+
+- Google OAuth
+- AWS S3 for asset/object storage
+- Amazon SES for transactional email
+
+## Repository Structure
+
+```text
+SportSync/
+  backend/                  FastAPI API service
+  frontend/                 React application
+  realtime/                 Go WebSocket service
+  nginx/                    Nginx config
+  backend/tests/            Pytest suite
+  frontend/e2e/             Playwright tests
+  .github/workflows/        CI/CD workflows
   docker-compose.yml
   docker-compose.prod.yml
   .env.example
-  .github/workflows/
+```
+
+## Testing
+
+Backend tests:
+
+```bash
+pytest backend/tests -q
+```
+
+Frontend production build:
+
+```bash
+cd frontend
+npm run build
+```
+
+Realtime tests:
+
+```bash
+cd realtime
+go test ./...
 ```
 
 ## License
 
 Personal engineering project by Louis Do. All rights reserved.
-
-(c) 2026 SportSync
