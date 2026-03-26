@@ -61,6 +61,51 @@ jobs:
           fi
           aws s3 cp "/tmp/sportsync-${GITHUB_SHA}.tar.gz" "s3://$STATIC_BUCKET/deployments/${GITHUB_SHA}.tar.gz"
 
+      - name: Verify EC2 and SSM are ready
+        run: |
+          set -euo pipefail
+
+          if [ -z "$EC2_INSTANCE_ID" ]; then
+            echo "EC2_INSTANCE_ID repository variable must be configured."
+            exit 1
+          fi
+
+          echo "Waiting for EC2 status checks to pass..."
+          aws ec2 wait instance-status-ok \
+            --region "$AWS_REGION" \
+            --instance-ids "$EC2_INSTANCE_ID"
+
+          echo "Waiting for SSM agent to report Online..."
+          ATTEMPTS=0
+          MAX_ATTEMPTS=36
+          SLEEP_SECONDS=10
+          SSM_STATUS=""
+
+          while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
+            SSM_STATUS=$(aws ssm describe-instance-information \
+              --region "$AWS_REGION" \
+              --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text 2>/dev/null || echo "Unknown")
+
+            echo "SSM ping status: $SSM_STATUS"
+
+            if [ "$SSM_STATUS" = "Online" ]; then
+              break
+            fi
+
+            sleep "$SLEEP_SECONDS"
+            ATTEMPTS=$((ATTEMPTS + 1))
+          done
+
+          if [ "$SSM_STATUS" != "Online" ]; then
+            echo "SSM agent is not Online on instance $EC2_INSTANCE_ID."
+            aws ssm describe-instance-information \
+              --region "$AWS_REGION" \
+              --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" || true
+            exit 1
+          fi
+
       - name: Deploy to EC2 through SSM
         run: |
           set -euo pipefail
@@ -103,14 +148,16 @@ jobs:
             --instance-ids "$EC2_INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters file:///tmp/ssm-commands.json \
+            --timeout-seconds 3600 \
             --comment "Deploy SportSync ${GITHUB_SHA}" \
             --query 'Command.CommandId' \
             --output text)
           
           ATTEMPTS=0
-          MAX_ATTEMPTS=90
+          MAX_ATTEMPTS=180
           SLEEP_SECONDS=10
           FINAL_STATUS=""
+          STUCK_PENDING_COUNT=0
 
           while [ "$ATTEMPTS" -lt "$MAX_ATTEMPTS" ]; do
             STATUS=$(aws ssm get-command-invocation \
@@ -131,7 +178,19 @@ jobs:
                 FINAL_STATUS="$STATUS"
                 break
                 ;;
-              Pending|InProgress|Delayed|"")
+              Pending|Delayed|"")
+                STUCK_PENDING_COUNT=$((STUCK_PENDING_COUNT + 1))
+                if [ "$STUCK_PENDING_COUNT" -ge 12 ]; then
+                  echo "Command has been stuck in pending/delayed status for too long. Checking SSM health..."
+                  aws ssm describe-instance-information \
+                    --region "$AWS_REGION" \
+                    --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" || true
+                fi
+                sleep "$SLEEP_SECONDS"
+                ATTEMPTS=$((ATTEMPTS + 1))
+                ;;
+              InProgress)
+                STUCK_PENDING_COUNT=0
                 sleep "$SLEEP_SECONDS"
                 ATTEMPTS=$((ATTEMPTS + 1))
                 ;;
