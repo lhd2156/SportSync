@@ -656,7 +656,7 @@ html {
 }
 
 .surface-live-badge {
-  background: rgba(239, 68, 68, 0.2);
+  background: transparent;
   color: #F87171;
 }
 
