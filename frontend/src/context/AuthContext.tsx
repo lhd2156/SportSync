@@ -189,6 +189,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncUser]);
 
   useEffect(() => {
+    void apiClient.get("/api/health", {
+      timeout: 4_000,
+    }).catch(() => {
+      // Non-blocking warm-up for cold starts.
+    });
+  }, []);
+
+  useEffect(() => {
     if (!hasAuthRestoreHint()) {
       setIsLoading(false);
       return;
