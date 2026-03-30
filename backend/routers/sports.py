@@ -57,8 +57,8 @@ THESPORTSDB_BASE = "https://www.thesportsdb.com/api/v1/json/3"
 
 # ESPN scoreboard base URL — public, no API key needed
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports"
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-ACTIVITY_CACHE_DIR = PROJECT_ROOT / ".cache" / "sports_activity"
+APP_ROOT = Path(__file__).resolve().parents[1]
+ACTIVITY_CACHE_DIR = APP_ROOT / ".cache" / "sports_activity"
 ACTIVITY_CACHE_VERSION = "v27"
 
 # League mapping: key → (espn_sport, espn_league, thesportsdb_id)
