@@ -201,11 +201,11 @@ function ScoreCard({
               style={{ width: `${homePct}%`, backgroundColor: homeColor }}
             />
           </div>
-          <div className="mt-2 flex items-center justify-between text-[11px] font-medium tracking-wide">
-            <span style={{ color: awayColor }}>
+          <div className="mt-2 flex items-center justify-between text-[11px] font-medium tracking-wide text-accent">
+            <span>
               {(awayTeam.shortName || awayTeam.name).toUpperCase()} {awayPct}%
             </span>
-            <span style={{ color: homeColor }}>
+            <span>
               {(homeTeam.shortName || homeTeam.name).toUpperCase()} {homePct}%
             </span>
           </div>
