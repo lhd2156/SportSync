@@ -6,6 +6,7 @@ import Navbar from "../components/Navbar";
 import Logo from "../components/Logo";
 import { API, ROUTES, STORAGE_KEYS } from "../constants";
 import { useAuth } from "../context/AuthContext";
+import { buildFallbackPrediction } from "../utils/predictions";
 
 const HERO_PILLS = [
   "Live slate",
@@ -460,7 +461,7 @@ function getBoardScore(game: ESPNGame) {
   if (game.status === "upcoming") {
     return "-- --";
   }
-  return `${game.homeScore} - ${game.awayScore}`;
+  return `${game.awayScore} - ${game.homeScore}`;
 }
 
 function getBoardNote(game: ESPNGame) {
@@ -908,7 +909,7 @@ export default function LandingPage() {
           } satisfies PredictionResult,
         };
       } catch {
-        return { gameId: game.id, prediction: null };
+        return { gameId: game.id, prediction: buildFallbackPrediction(game) };
       }
     };
 
@@ -1146,9 +1147,9 @@ export default function LandingPage() {
                       <section key={game.id} className={index === 0 ? "bg-background/35" : undefined}>
                         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-4 px-6 py-5">
                           <div className="flex min-w-0 items-center gap-3">
-                            <TeamBadge abbr={game.homeAbbr} logo={game.homeBadge} name={game.homeTeam} />
+                            <TeamBadge abbr={game.awayAbbr} logo={game.awayBadge} name={game.awayTeam} />
                             <div className="min-w-0">
-                              <p className="truncate text-[0.96rem] font-semibold text-foreground">{game.homeTeam}</p>
+                              <p className="truncate text-[0.96rem] font-semibold text-foreground">{game.awayTeam}</p>
                               <p className="text-xs text-muted">{game.league}</p>
                             </div>
                           </div>
@@ -1164,10 +1165,10 @@ export default function LandingPage() {
 
                           <div className="flex min-w-0 items-center justify-end gap-3 text-right">
                             <div className="min-w-0">
-                              <p className="truncate text-[0.96rem] font-semibold text-foreground">{game.awayTeam}</p>
+                              <p className="truncate text-[0.96rem] font-semibold text-foreground">{game.homeTeam}</p>
                               <p className="text-xs text-muted">{getBoardDateLabel(game)}</p>
                             </div>
-                            <TeamBadge abbr={game.awayAbbr} logo={game.awayBadge} name={game.awayTeam} />
+                            <TeamBadge abbr={game.homeAbbr} logo={game.homeBadge} name={game.homeTeam} />
                           </div>
                         </div>
 

@@ -6,7 +6,7 @@
  * Token is stored in memory only. Refresh tokens live in HTTP-only cookies
  * that the browser sends automatically.
  */
-import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import apiClient, { setAccessToken } from "../api/client";
 import { API, STORAGE_KEYS } from "../constants";
@@ -26,6 +26,8 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_REFRESH_TIMEOUT_MS = 6_000;
+const AUTH_SUBMIT_TIMEOUT_MS = 10_000;
 
 function readString(data: Record<string, unknown>, ...keys: string[]): string {
   for (const key of keys) {
@@ -136,6 +138,7 @@ function clearClientAuthArtifacts(): void {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const authRequestIdRef = useRef(0);
 
   const syncUser = useCallback((nextUser: User | null) => {
     setUserState(nextUser);
@@ -144,25 +147,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   /* Try to restore session on mount by refreshing the access token */
   const refreshAuth = useCallback(async () => {
+    const requestId = ++authRequestIdRef.current;
     try {
-      const response = await apiClient.post(API.AUTH_REFRESH);
+      const response = await apiClient.post(API.AUTH_REFRESH, undefined, {
+        timeout: AUTH_REFRESH_TIMEOUT_MS,
+      });
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
       setAccessToken(response.data.access_token);
 
       // Try to fetch full profile; fall back to building from refresh response
       try {
-        const profileResponse = await apiClient.get(API.USER_PROFILE);
+        const profileResponse = await apiClient.get(API.USER_PROFILE, {
+          timeout: AUTH_REFRESH_TIMEOUT_MS,
+        });
+        if (requestId !== authRequestIdRef.current) {
+          return;
+        }
         syncUser(buildUserFromResponse(profileResponse.data));
       } catch {
+        if (requestId !== authRequestIdRef.current) {
+          return;
+        }
         syncUser(buildUserFromResponse(response.data));
       }
       writeAuthSessionHint(true);
     } catch {
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
       /* No valid session, user must log in */
       setAccessToken(null);
       clearClientAuthArtifacts();
       syncUser(null);
     } finally {
-      setIsLoading(false);
+      if (requestId === authRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, [syncUser]);
 
@@ -175,15 +197,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshAuth]);
 
   const login = useCallback(async (email: string, password: string, rememberMe: boolean) => {
-    const response = await apiClient.post(API.AUTH_LOGIN, {
-      email,
-      password,
-      remember_me: rememberMe,
-    });
+    const requestId = ++authRequestIdRef.current;
+    try {
+      const response = await apiClient.post(API.AUTH_LOGIN, {
+        email,
+        password,
+        remember_me: rememberMe,
+      }, {
+        timeout: AUTH_SUBMIT_TIMEOUT_MS,
+      });
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
 
-    setAccessToken(response.data.access_token);
-    writeAuthSessionHint(true);
-    syncUser(buildUserFromResponse(response.data));
+      setAccessToken(response.data.access_token);
+      writeAuthSessionHint(true);
+      syncUser(buildUserFromResponse(response.data));
+    } finally {
+      if (requestId === authRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
   }, [syncUser]);
 
   const register = useCallback(async (
@@ -196,39 +230,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     dateOfBirth: string,
     gender: string | null,
   ) => {
-    const response = await apiClient.post(API.AUTH_REGISTER, {
-      email,
-      password,
-      confirm_password: confirmPassword,
-      first_name: firstName,
-      last_name: lastName,
-      display_name: displayName,
-      date_of_birth: dateOfBirth,
-      gender: gender || null,
-    });
+    const requestId = ++authRequestIdRef.current;
+    try {
+      const response = await apiClient.post(API.AUTH_REGISTER, {
+        email,
+        password,
+        confirm_password: confirmPassword,
+        first_name: firstName,
+        last_name: lastName,
+        display_name: displayName,
+        date_of_birth: dateOfBirth,
+        gender: gender || null,
+      }, {
+        timeout: AUTH_SUBMIT_TIMEOUT_MS,
+      });
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
 
-    setAccessToken(response.data.access_token);
-    writeAuthSessionHint(true);
-    syncUser(buildUserFromResponse(response.data));
+      setAccessToken(response.data.access_token);
+      writeAuthSessionHint(true);
+      syncUser(buildUserFromResponse(response.data));
+    } finally {
+      if (requestId === authRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
   }, [syncUser]);
 
   const loginWithGoogle = useCallback(async (googleToken: string) => {
-    const response = await apiClient.post(API.AUTH_GOOGLE, {
-      google_token: googleToken,
-    });
+    const requestId = ++authRequestIdRef.current;
+    try {
+      const response = await apiClient.post(API.AUTH_GOOGLE, {
+        google_token: googleToken,
+      }, {
+        timeout: AUTH_SUBMIT_TIMEOUT_MS,
+      });
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
 
-    setAccessToken(response.data.access_token);
-    writeAuthSessionHint(true);
-    syncUser(buildUserFromResponse(response.data));
+      setAccessToken(response.data.access_token);
+      writeAuthSessionHint(true);
+      syncUser(buildUserFromResponse(response.data));
+    } finally {
+      if (requestId === authRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
   }, [syncUser]);
 
   const logout = useCallback(async () => {
+    const requestId = ++authRequestIdRef.current;
     try {
-      await apiClient.post(API.AUTH_LOGOUT);
+      await apiClient.post(API.AUTH_LOGOUT, undefined, {
+        timeout: AUTH_REFRESH_TIMEOUT_MS,
+      });
     } finally {
+      if (requestId !== authRequestIdRef.current) {
+        return;
+      }
       setAccessToken(null);
       clearClientAuthArtifacts();
       syncUser(null);
+      setIsLoading(false);
     }
   }, [syncUser]);
 
