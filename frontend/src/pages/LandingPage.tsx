@@ -85,6 +85,7 @@ const CHECKLIST = [
 ] as const;
 
 const BOARD_LEAGUES = new Set(["NFL", "NBA", "MLB", "NHL", "EPL"]);
+const BOARD_LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
 const BOARD_REFRESH_INTERVAL_MS = 60_000;
 const BOARD_LOOKBACK_DAYS = 3;
 const BOARD_SLOTS = 3;
@@ -780,7 +781,28 @@ export default function LandingPage() {
       const response = await apiClient.get(API.ESPN_ALL, {
         params: { d: dateKey },
       });
-      return normalizeBoardGames(response.data?.games);
+      const aggregateGames = normalizeBoardGames(response.data?.games);
+      if (aggregateGames.length) {
+        return aggregateGames;
+      }
+
+      const leagueResponses = await Promise.allSettled(
+        BOARD_LEAGUE_ORDER.map((league) =>
+          apiClient.get(API.ESPN_SCOREBOARD, {
+            params: { league, d: dateKey },
+          })
+        ),
+      );
+
+      const fallbackGames = leagueResponses.flatMap((result) => {
+        if (result.status !== "fulfilled") {
+          return [];
+        }
+
+        return normalizeBoardGames(result.value.data?.games);
+      });
+
+      return dedupeBoardGames(fallbackGames);
     };
 
     const loadBoard = async () => {

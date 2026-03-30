@@ -3804,9 +3804,12 @@ async def espn_scoreboard(
         return {"games": [], "error": f"Unknown league: {league}"}
 
     sport, espn_league, _ = LEAGUES[league_upper]
+    normalized_date = str(d or "").strip().replace("-", "")
+    if normalized_date and len(normalized_date) != 8:
+        normalized_date = ""
     url = f"{ESPN_BASE}/{sport}/{espn_league}/scoreboard"
-    if d:
-        url += f"?dates={d}"
+    if normalized_date:
+        url += f"?dates={normalized_date}"
 
     data = await _fetch_cached(url)
     if not data:
@@ -3827,7 +3830,8 @@ async def espn_all_leagues(
     Returns games grouped by league, ordered: NFL, NBA, MLB, NHL, EPL.
     Uses parallel fetching for performance.
     """
-    date_param = d or datetime.now().strftime("%Y%m%d")
+    normalized_date = str(d or "").strip().replace("-", "")
+    date_param = normalized_date if len(normalized_date) == 8 else datetime.now().strftime("%Y%m%d")
     cached = _espn_all_cache.get(date_param)
     if cached and time.time() - cached[0] < ESPN_ALL_CACHE_TTL:
         cached_payload = cached[1]
@@ -3844,9 +3848,34 @@ async def espn_all_leagues(
         return key, await _fetch_cached(url, timeout=4.0)
 
     results = await asyncio.gather(*[fetch_league(k) for k in league_keys])
+    unresolved_leagues: list[str] = []
     for key, data in results:
-        if data:
-            for ev in data.get("events", []):
+        events = data.get("events", []) if isinstance(data, dict) else []
+        if events:
+            for ev in events:
+                all_games.append(_parse_espn_event(ev, key))
+            continue
+
+        unresolved_leagues.append(key)
+
+    async def fetch_league_fallback(key: str):
+        sport, espn_league, _ = LEAGUES[key]
+        url = f"{ESPN_BASE}/{sport}/{espn_league}/scoreboard?dates={date_param}"
+        fresh_data = await _fetch_fresh(url, timeout=8.0)
+        events = fresh_data.get("events", []) if isinstance(fresh_data, dict) else []
+        return key, events
+
+    if unresolved_leagues:
+        fallback_results = await asyncio.gather(
+            *[fetch_league_fallback(key) for key in unresolved_leagues],
+            return_exceptions=True,
+        )
+        for result in fallback_results:
+            if isinstance(result, Exception):
+                continue
+
+            key, events = result
+            for ev in events:
                 all_games.append(_parse_espn_event(ev, key))
 
     _emit_live_score_updates(all_games)
