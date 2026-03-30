@@ -189,11 +189,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncUser]);
 
   useEffect(() => {
-    void apiClient.get("/api/health", {
-      timeout: 4_000,
-    }).catch(() => {
-      // Non-blocking warm-up for cold starts.
-    });
+    const today = new Date().toISOString().slice(0, 10);
+
+    void Promise.allSettled([
+      apiClient.get("/api/health", {
+        timeout: 4_000,
+      }),
+      apiClient.get(API.ESPN_FEATURED, {
+        timeout: 6_000,
+      }),
+      apiClient.get(API.ESPN_ALL, {
+        params: { d: today },
+        timeout: 7_000,
+      }),
+    ]);
   }, []);
 
   useEffect(() => {

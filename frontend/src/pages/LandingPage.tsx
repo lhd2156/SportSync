@@ -620,10 +620,10 @@ function BoardPredictionLine({
           />
         </div>
         <div className="mt-2 flex items-center justify-between text-[11px] font-medium tracking-wide">
-          <span className="text-accent">
+          <span style={{ color: awayColor }}>
             {game.awayAbbr.toUpperCase()} {awayPct}%
           </span>
-          <span className="text-accent">
+          <span style={{ color: homeColor }}>
             {game.homeAbbr.toUpperCase()} {homePct}%
           </span>
         </div>
