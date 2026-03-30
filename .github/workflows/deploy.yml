@@ -5,6 +5,10 @@ on:
     branches: [main, predeploy-final]
   workflow_dispatch:
 
+concurrency:
+  group: sportsync-deploy
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy to AWS EC2
@@ -45,7 +49,7 @@ jobs:
 
       - name: Sync static assets to S3
         if: env.STATIC_BUCKET != ''
-        run: aws s3 sync frontend/dist "s3://$STATIC_BUCKET" --delete
+        run: aws s3 sync frontend/dist "s3://$STATIC_BUCKET" --delete --exclude "deployments/*"
 
       - name: Package application bundle
         run: |
@@ -60,6 +64,7 @@ jobs:
             exit 1
           fi
           aws s3 cp "/tmp/sportsync-${GITHUB_SHA}.tar.gz" "s3://$STATIC_BUCKET/deployments/${GITHUB_SHA}.tar.gz"
+          aws s3api head-object --bucket "$STATIC_BUCKET" --key "deployments/${GITHUB_SHA}.tar.gz" >/dev/null
 
       - name: Verify EC2 and SSM are ready
         run: |
