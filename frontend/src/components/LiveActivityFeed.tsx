@@ -7,6 +7,7 @@
  */
 import { useState, useMemo, useRef, useEffect, useCallback, memo } from "react";
 import { API } from "../constants";
+import { normalizeConfiguredLoopbackUrl } from "../utils/http";
 
 type FeedItem = {
   id: string;
@@ -68,7 +69,18 @@ type PitchMatchup = {
 };
 
 const LEAGUE_ORDER = ["NFL", "NBA", "MLB", "NHL", "EPL"] as const;
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = (() => {
+  const configured = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+  if (configured) {
+    return normalizeConfiguredLoopbackUrl(configured);
+  }
+
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+
+  return "http://localhost:8000";
+})();
 const loadedHeadshotSources = new Set<string>();
 const failedHeadshotChains = new Set<string>();
 
@@ -1571,12 +1583,6 @@ export default function LiveActivityFeed({ items, allItems, activityDate, onDate
             </div>
           )}
 
-          {loading && items.length > 0 && (
-            <div className="sticky top-0 z-10 border-b border-accent/10 bg-background/85 px-4 py-2 text-[11px] text-accent backdrop-blur-sm">
-              Loading{leagueFilter !== "ALL" ? ` ${leagueFilter}` : ""} plays{activityDate ? ` for ${formatDateLabel(activityDate)}` : ""}...
-            </div>
-          )}
-
           {/* Loading spinner — takes priority over empty state */}
           {loading && items.length === 0 ? (
             <div className="min-h-[420px] lg:min-h-[520px] p-8 flex flex-col items-center justify-center gap-2">
@@ -1590,7 +1596,7 @@ export default function LiveActivityFeed({ items, allItems, activityDate, onDate
             <div className="min-h-[420px] lg:min-h-[520px] p-8 flex flex-col items-center justify-center gap-2 text-center">
             <p className="text-sm text-warning">{error}</p>
               <p className="max-w-md text-xs text-muted">
-                The feed could not reach the local API on localhost:8000, so this is a connection issue rather than a real empty activity window.
+                Live activity is still warming up. Please try again in a moment.
               </p>
             </div>
           ) : filtered.length === 0 ? (

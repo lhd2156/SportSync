@@ -68,6 +68,8 @@ const LIVE_DASHBOARD_REFRESH_MS = 12_000;
 const LIVE_PREDICTION_CACHE_TTL_MS = 12_000;
 const DASHBOARD_NEWS_CACHE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FEATURED_CACHE_TTL_MS = 60_000;
+const ACTIVITY_PREFETCH_PAGE_LIMIT = 2;
+const API_WARM_RETRY_TIMEOUT_MS = 4_000;
 
 const warmedDashboardImageUrls = new Set<string>();
 
@@ -629,12 +631,17 @@ export default function DashboardPage() {
   );
   const gamesQuery = useQuery<GameItem[]>({
     queryKey: ["dashboardGames", selectedDateKey],
-    queryFn: async () => loadSlateForDate(selectedDateKey),
+    queryFn: async () => {
+      try {
+        return await loadSlateForDate(selectedDateKey);
+      } catch {
+        await warmApiConnection();
+        return loadSlateForDate(selectedDateKey);
+      }
+    },
     initialData: (() => {
       const cachedSlate = gameSlateCacheRef.current[selectedDateKey];
-      const isCurrentDay = selectedDateKey === formatCompactDate(new Date());
-      const ttlMs = isCurrentDay ? 30_000 : 15 * 60_000;
-      if (cachedSlate && Date.now() - cachedSlate.cachedAt < ttlMs) {
+      if (cachedSlate?.data?.length) {
         return cachedSlate.data;
       }
       return undefined;
@@ -643,6 +650,7 @@ export default function DashboardPage() {
     refetchInterval: isSelectedDateToday ? LIVE_DASHBOARD_REFRESH_MS : false,
     refetchIntervalInBackground: false,
     staleTime: isSelectedDateToday ? 0 : 15 * 60_000,
+    retry: false,
   });
   const games = useMemo(() => gamesQuery.data ?? [], [gamesQuery.data]);
   const gamesError = gamesQuery.error instanceof Error
@@ -1050,6 +1058,14 @@ export default function DashboardPage() {
     return unique;
   }, [persistGameSlateCache]);
 
+  const warmApiConnection = useCallback(async () => {
+    try {
+      await apiClient.get("/api/health", { timeout: API_WARM_RETRY_TIMEOUT_MS });
+    } catch {
+      // Best effort warm-up only.
+    }
+  }, []);
+
   const persistActivityCache = useCallback(() => {
     const entries = Object.entries(activityResponseCacheRef.current);
     const compact = Object.fromEntries(
@@ -1263,7 +1279,8 @@ export default function DashboardPage() {
     let total = 0;
     let offset = 0;
 
-    while (offset < 240) {
+    let pageCount = 0;
+    while (pageCount < ACTIVITY_PREFETCH_PAGE_LIMIT) {
       const params: Record<string, string | number> = {
         limit: ACTIVITY_PAGE_SIZE,
         offset,
@@ -1285,6 +1302,7 @@ export default function DashboardPage() {
         break;
       }
       offset += activities.length;
+      pageCount += 1;
       if (activities.length < ACTIVITY_PAGE_SIZE) {
         break;
       }
@@ -1340,11 +1358,18 @@ export default function DashboardPage() {
 
   const activityQuery = useQuery<ActivityCacheEntry>({
     queryKey: ["dashboardActivity", activityDate || "LIVE", activityLeague],
-    queryFn: async () => loadActivityFeed(activityDate || undefined, activityLeague),
+    queryFn: async () => {
+      try {
+        return await loadActivityFeed(activityDate || undefined, activityLeague);
+      } catch {
+        await warmApiConnection();
+        return loadActivityFeed(activityDate || undefined, activityLeague);
+      }
+    },
     initialData: (() => {
       const cacheKey = buildActivityCacheKey(activityDate || undefined, activityLeague);
       const cachedEntry = activityResponseCacheRef.current[cacheKey];
-      if (!isFreshLiveActivityEntry(cacheKey, cachedEntry)) {
+      if (!cachedEntry?.items?.length) {
         return undefined;
       }
       return {
@@ -1356,6 +1381,7 @@ export default function DashboardPage() {
     refetchInterval: !activityDate ? LIVE_DASHBOARD_REFRESH_MS : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
+    retry: false,
   });
 
   const loadMoreActivity = useCallback(() => {
@@ -1806,10 +1832,23 @@ export default function DashboardPage() {
     mergeActivityFinalSummaries,
     normalizeActivityItemsForDisplay,
   ]);
+  const fallbackActivityItems = useMemo(() => {
+    const relevantGames = games.filter(
+      (game) => activityLeague === "ALL" || game.leagueKey === activityLeague,
+    );
+    return buildDashboardGameSummaryActivities(relevantGames).slice(0, ACTIVITY_PAGE_SIZE);
+  }, [activityLeague, buildDashboardGameSummaryActivities, games]);
+  const effectiveActivityAllItems =
+    displayActivityAllItems.length > 0 ? displayActivityAllItems : fallbackActivityItems;
+  const effectiveActivityItems =
+    displayActivityItems.length > 0
+      ? displayActivityItems
+      : fallbackActivityItems.slice(0, activityVisibleCount);
   const activityDisplayTotal = useMemo(
-    () => Math.max(activityTotal, displayActivityItems.length),
-    [activityTotal, displayActivityItems.length],
+    () => Math.max(activityTotal, effectiveActivityItems.length),
+    [activityTotal, effectiveActivityItems.length],
   );
+  const activityUiError = effectiveActivityAllItems.length > 0 ? "" : activityError;
 
   const visibleNewsItems = useMemo(() => {
     const allNews = allNewsQuery.data || [];
@@ -2029,12 +2068,12 @@ export default function DashboardPage() {
         )}
 
         {/* No games */}
-        {!isLoading && gamesError && (
+        {!isLoading && gamesError && games.length === 0 && (
           <section className={`px-4 mb-8 ${slateTransitionClass}`}>
             <div className="surface-note-warning rounded-xl p-8 text-center">
               <p className="text-[color:var(--panel-text-warning)]">{gamesError}</p>
               <p className="text-muted text-sm mt-1">
-                The dashboard could not reach `http://localhost:8000`, so this is a connection issue rather than a real no-games slate.
+                We could not refresh the scoreboard right now. Please try again in a moment.
               </p>
             </div>
           </section>
@@ -2108,15 +2147,15 @@ export default function DashboardPage() {
         {/* ── Live Activity Feed ── */}
         <section className="px-4 mb-8">
           <LiveActivityFeed
-            items={displayActivityItems}
-            allItems={displayActivityAllItems}
+            items={effectiveActivityItems}
+            allItems={effectiveActivityAllItems}
             activityDate={activityEffectiveDate}
             onDateChange={handleActivityDateChange}
             hasMore={activityHasMore}
             onLoadMore={loadMoreActivity}
             total={activityDisplayTotal}
-            loading={activityLoading}
-            error={activityError}
+            loading={activityLoading && effectiveActivityAllItems.length === 0}
+            error={activityUiError}
             activeLeague={activityLeague}
             savedTeams={savedTeams}
             onLeagueChange={(league) => {
