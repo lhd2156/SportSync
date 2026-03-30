@@ -24,6 +24,33 @@ function clampProbability(value: number, floor = 0.02, ceiling = 0.98) {
   return Math.max(floor, Math.min(ceiling, value));
 }
 
+function clampNonNegative(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, value);
+}
+
+export function getDisplayPercentages(homeWinProb: number, awayWinProb: number): {
+  homePct: number;
+  awayPct: number;
+} {
+  const normalizedHome = clampNonNegative(homeWinProb);
+  const normalizedAway = clampNonNegative(awayWinProb);
+  const total = normalizedHome + normalizedAway;
+
+  if (total <= 0) {
+    return { homePct: 50, awayPct: 50 };
+  }
+
+  const homeShare = normalizedHome / total;
+  const homePct = Math.max(0, Math.min(100, Math.round(homeShare * 100)));
+  const awayPct = 100 - homePct;
+
+  return { homePct, awayPct };
+}
+
 export function buildFallbackPrediction(game: PredictionEligibleGame): PredictionResult {
   const league = String("leagueKey" in game ? game.leagueKey : game.league || "")
     .trim()

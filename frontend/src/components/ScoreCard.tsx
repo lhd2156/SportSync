@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Link } from "react-router-dom";
 import LiveBadge from "./LiveBadge";
+import { getDisplayPercentages } from "../utils/predictions";
 
 type ScoreCardProps = {
   id: string;
@@ -134,8 +135,10 @@ function ScoreCard({
 
   const homeColor = toCssColor(homeTeam.color, "var(--accent)");
   const awayColor = toCssColor(awayTeam.color, "var(--chart-axis)");
-  const homePct = Math.max(0, Math.min(100, Math.round((prediction?.homeWinProb ?? 0) * 100)));
-  const awayPct = Math.max(0, Math.min(100, Math.round((prediction?.awayWinProb ?? 0) * 100)));
+  const { homePct, awayPct } = getDisplayPercentages(
+    prediction?.homeWinProb ?? 0,
+    prediction?.awayWinProb ?? 0,
+  );
   const shouldShowPrediction = canShowPrediction && !!prediction;
   const shouldShowPredictionLoading = canShowPrediction && !prediction && !!predictionLoading;
   const shouldReservePredictionSpace = reservePredictionSpace && !shouldShowPrediction && !shouldShowPredictionLoading;
@@ -199,10 +202,10 @@ function ScoreCard({
             />
           </div>
           <div className="mt-2 flex items-center justify-between text-[11px] font-medium tracking-wide">
-            <span className="text-accent">
+            <span style={{ color: awayColor }}>
               {(awayTeam.shortName || awayTeam.name).toUpperCase()} {awayPct}%
             </span>
-            <span className="text-accent">
+            <span style={{ color: homeColor }}>
               {(homeTeam.shortName || homeTeam.name).toUpperCase()} {homePct}%
             </span>
           </div>
