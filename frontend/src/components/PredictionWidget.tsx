@@ -6,6 +6,7 @@
  */
 import { memo } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, LabelList } from "recharts";
+import { getDisplayPercentages } from "../utils/predictions";
 
 type PredictionWidgetProps = {
   homeTeam: string;
@@ -22,9 +23,10 @@ function PredictionWidget({
   awayWinProb,
   modelVersion,
 }: PredictionWidgetProps) {
+  const { homePct, awayPct } = getDisplayPercentages(homeWinProb, awayWinProb);
   const data = [
-    { team: homeTeam, probability: Math.round(homeWinProb * 100), isHome: true },
-    { team: awayTeam, probability: Math.round(awayWinProb * 100), isHome: false },
+    { team: homeTeam, probability: homePct, isHome: true },
+    { team: awayTeam, probability: awayPct, isHome: false },
   ];
 
   return (

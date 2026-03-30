@@ -6,7 +6,7 @@ import Navbar from "../components/Navbar";
 import Logo from "../components/Logo";
 import { API, ROUTES } from "../constants";
 import { useAuth } from "../context/AuthContext";
-import { buildFallbackPrediction } from "../utils/predictions";
+import { buildFallbackPrediction, getDisplayPercentages } from "../utils/predictions";
 
 const HERO_PILLS = [
   "Live slate",
@@ -603,8 +603,10 @@ function BoardPredictionLine({
   }
 
   if (prediction) {
-    const homePct = Math.max(0, Math.min(100, Math.round(prediction.homeWinProb * 100)));
-    const awayPct = Math.max(0, Math.min(100, Math.round(prediction.awayWinProb * 100)));
+    const { homePct, awayPct } = getDisplayPercentages(
+      prediction.homeWinProb,
+      prediction.awayWinProb,
+    );
     const homeColor = toCssColor(game.homeColor, "var(--accent)");
     const awayColor = toCssColor(game.awayColor, "var(--chart-axis)");
 
