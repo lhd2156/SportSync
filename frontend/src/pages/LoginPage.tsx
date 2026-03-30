@@ -36,8 +36,12 @@ export default function LoginPage() {
       );
       navigate(redirectTarget);
     } catch (err: unknown) {
-      const apiError = err as { response?: { data?: { detail?: string } } };
-      setError(apiError.response?.data?.detail || "Login failed. Please try again.");
+      const apiError = err as { code?: string; response?: { data?: { detail?: string } } };
+      setError(
+        apiError.response?.data?.detail
+        || (apiError.code === "ECONNABORTED" ? "Login timed out. Please try again." : "")
+        || "Login failed. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }

@@ -38,6 +38,7 @@ import type {
   PredictionResult,
   SavedTeamSummary,
 } from "../types/dashboard";
+import { buildFallbackPrediction } from "../utils/predictions";
 
 /* ── SVG Icons (no emojis) ── */
 const IconUpcoming = () => (
@@ -1491,7 +1492,7 @@ export default function DashboardPage() {
     let cancelled = false;
     let deferredTimer: number | null = null;
 
-    const PREDICTION_TIMEOUT_MS = 3_500;
+    const PREDICTION_TIMEOUT_MS = 8_000;
     const PRIORITY_PREDICTION_COUNT = 16;
     const PREDICTION_CHUNK_SIZE = 4;
     const PREDICTION_BATCH_SIZE = 18;
@@ -1534,7 +1535,11 @@ export default function DashboardPage() {
         };
         return { gameId: game.id, prediction, ok: true as const };
       } catch {
-        return { gameId: game.id, prediction: null, ok: false as const };
+        return {
+          gameId: game.id,
+          prediction: buildFallbackPrediction(game),
+          ok: true as const,
+        };
       } finally {
         clearTimeout(timer);
       }

@@ -81,8 +81,12 @@ export default function RegisterPage() {
       await register(email, password, confirmPassword, firstName.trim(), lastName.trim(), fullDisplayName, dateOfBirth, gender || null);
       navigate(ROUTES.ONBOARDING_STEP_2);
     } catch (err: unknown) {
-      const apiError = err as { response?: { data?: { detail?: string } } };
-      setError(apiError.response?.data?.detail || "Registration failed. Please try again.");
+      const apiError = err as { code?: string; response?: { data?: { detail?: string } } };
+      setError(
+        apiError.response?.data?.detail
+        || (apiError.code === "ECONNABORTED" ? "Registration timed out. Please try again." : "")
+        || "Registration failed. Please try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }
