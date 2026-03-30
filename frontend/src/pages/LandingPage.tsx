@@ -4,7 +4,7 @@ import apiClient from "../api/client";
 import Footer from "../components/Footer";
 import Navbar from "../components/Navbar";
 import Logo from "../components/Logo";
-import { API, ROUTES, STORAGE_KEYS } from "../constants";
+import { API, ROUTES } from "../constants";
 import { useAuth } from "../context/AuthContext";
 import { buildFallbackPrediction } from "../utils/predictions";
 
@@ -510,18 +510,6 @@ function prefersReducedMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-function hasStoredAuthUserSnapshot() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  try {
-    return Boolean(sessionStorage.getItem(STORAGE_KEYS.AUTH_USER_SNAPSHOT));
-  } catch {
-    return false;
-  }
-}
-
 function StatValue({
   current,
   suffix,
@@ -667,7 +655,6 @@ export default function LandingPage() {
   const statsAnimatedRef = useRef(false);
   const statsFrameRef = useRef<number | null>(null);
   const boardLoadedRef = useRef(false);
-  const [hasAuthSnapshot, setHasAuthSnapshot] = useState(() => hasStoredAuthUserSnapshot());
   const [heroVisible, setHeroVisible] = useState(() => prefersReducedMotion());
   const [animatedStats, setAnimatedStats] = useState<number[]>(() =>
     prefersReducedMotion() ? STATS.map((stat) => stat.value) : STATS.map(() => 0)
@@ -682,11 +669,7 @@ export default function LandingPage() {
 
   const dashboardCta = ROUTES.DASHBOARD;
   const highlightsCta = ROUTES.HIGHLIGHTS;
-  const showAuthenticatedNavbar = !!user || isAuthenticated || (isLoading && hasAuthSnapshot);
-
-  useEffect(() => {
-    setHasAuthSnapshot(hasStoredAuthUserSnapshot());
-  }, [user, isAuthenticated, isLoading]);
+  const showAuthenticatedNavbar = !!user || isAuthenticated;
 
   useEffect(() => {
     if (prefersReducedMotion()) {

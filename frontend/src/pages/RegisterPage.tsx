@@ -101,7 +101,7 @@ export default function RegisterPage() {
         <div className="w-full max-w-md">
           {/* Logo above card */}
           <div className="text-center mb-6">
-            <Logo size="lg" />
+            <Logo size="lg" linkTo={ROUTES.HOME} />
             <p className="text-muted mt-2">Create your account</p>
           </div>
 
