@@ -1753,8 +1753,8 @@ export default function DashboardPage() {
         item.league,
       );
       const game = gameLookup.get(item.gameId);
-      const nextStatus = game?.status || item.status;
-      const nextStatusDetail = game?.statusDetail || item.statusDetail;
+      const nextStatus = item.status || game?.status || "";
+      const nextStatusDetail = item.statusDetail || "";
       const nextSortWallclock = item.sortWallclock || game?.scheduledAt || "";
       if (
         item.isSavedTeam === nextSavedState &&
