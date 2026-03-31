@@ -59,7 +59,7 @@ const LEAGUE_PRIORITY: Record<string, number> = {
 };
 const ACTIVITY_PAGE_SIZE = 40;
 const ACTIVITY_FETCH_BATCH_SIZE = 500;
-const ACTIVITY_DISPLAY_CACHE_VERSION = "v19";
+const ACTIVITY_DISPLAY_CACHE_VERSION = "v20";
 const ACTIVITY_CACHE_STORAGE_KEY = `sportsync_activity_cache_${ACTIVITY_DISPLAY_CACHE_VERSION}`;
 const PREDICTION_CACHE_STORAGE_KEY = "sportsync_prediction_cache_v2";
 const GAME_SLATE_CACHE_STORAGE_KEY = "sportsync_game_slate_cache_v3";
@@ -293,8 +293,13 @@ function isFutureCompactDate(dateStr?: string): boolean {
   return Boolean(dateStr && dateStr > formatCompactDate(new Date()));
 }
 
-function buildActivityCacheKey(dateStr?: string, leagueStr?: string): string {
-  return `${ACTIVITY_DISPLAY_CACHE_VERSION}::${(leagueStr || "ALL").toUpperCase()}::${dateStr || "LIVE"}`;
+function buildActivityCacheKey(
+  dateStr?: string,
+  leagueStr?: string,
+  statusFilter: "all" | "live" | "final" = "all",
+  fetchTargetCount = ACTIVITY_PAGE_SIZE,
+): string {
+  return `${ACTIVITY_DISPLAY_CACHE_VERSION}::${(leagueStr || "ALL").toUpperCase()}::${statusFilter}::${fetchTargetCount}::${dateStr || "LIVE"}`;
 }
 
 function parseCompactDate(dateStr?: string): Date | null {
@@ -655,6 +660,10 @@ export default function DashboardPage() {
 
     return activityStatusFilter === "final" ? resolvedActivityDate : "";
   }, [activityDate, activityStatusFilter, selectedDateKey]);
+  const activityFetchTarget = useMemo(
+    () => activityVisibleCount + ACTIVITY_PAGE_SIZE,
+    [activityVisibleCount],
+  );
   const gamesQuery = useQuery<GameItem[]>({
     queryKey: ["dashboardGames", selectedDateKey],
     queryFn: async () => {
@@ -953,9 +962,13 @@ export default function DashboardPage() {
     return sortSummaryActivitiesChronologically(items);
   }, [isSavedMatchup]);
 
-  const fetchLiveActivityDirect = useCallback(async (leagueStr?: string) => {
+  const fetchLiveActivityDirect = useCallback(async (
+    leagueStr?: string,
+    statusFilter: "all" | "live" | "final" = "all",
+    fetchTargetCount: number = ACTIVITY_PAGE_SIZE,
+  ) => {
     const todayStr = formatCompactDate(new Date());
-    const requestKey = `${(leagueStr || "ALL").toUpperCase()}::${todayStr}`;
+    const requestKey = `${(leagueStr || "ALL").toUpperCase()}::${statusFilter}::${fetchTargetCount}::${todayStr}`;
     const existingRequest = liveActivityRequestPromiseRef.current[requestKey];
     if (existingRequest) {
       return existingRequest;
@@ -968,14 +981,18 @@ export default function DashboardPage() {
       let pageCount = 0;
 
       while (pageCount < MAX_ACTIVITY_FETCH_PAGES) {
+        const remainingCount = Math.max(fetchTargetCount - collectedActivities.length, ACTIVITY_PAGE_SIZE);
         const params: Record<string, string | number | boolean> = {
           date: todayStr,
           live_day: true,
-          limit: ACTIVITY_FETCH_BATCH_SIZE,
+          limit: Math.min(ACTIVITY_FETCH_BATCH_SIZE, remainingCount),
           offset,
         };
         if (leagueStr && leagueStr !== "ALL") {
           params.league = leagueStr;
+        }
+        if (statusFilter !== "all") {
+          params.status_filter = statusFilter;
         }
 
         const resp = await apiClient.get(API.ESPN_ACTIVITY, { params });
@@ -984,7 +1001,7 @@ export default function DashboardPage() {
         collectedActivities.push(...activities);
 
         const hasMore = Boolean(resp.data.hasMore);
-        if (!hasMore || activities.length === 0) {
+        if (!hasMore || activities.length === 0 || collectedActivities.length >= fetchTargetCount) {
           break;
         }
 
@@ -1003,7 +1020,7 @@ export default function DashboardPage() {
       return {
         items: parsed,
         total: Math.max(total, parsed.length),
-        hasMore: false,
+        hasMore: parsed.length < total,
         allItems: parsed,
         effectiveDate: "",
       } as ActivityCacheEntry;
@@ -1017,7 +1034,6 @@ export default function DashboardPage() {
     }
   }, [parseActivities]);
 
-  const latestActivityDateCacheRef = useRef<Record<string, string | null>>({});
   const activityResponseCacheRef = useRef<Record<string, ActivityCacheEntry>>(
     readSessionJson<Record<string, ActivityCacheEntry>>(ACTIVITY_CACHE_STORAGE_KEY, {}),
   );
@@ -1114,89 +1130,6 @@ export default function DashboardPage() {
     persistActivityCache();
   }, [persistActivityCache]);
 
-  const findLatestMatchingDate = useCallback(async (matcher: (dateStr: string) => Promise<boolean>, maxDaysBack = 400) => {
-    for (let offset = 1; offset <= maxDaysBack; offset += 1) {
-      const candidateDate = new Date();
-      candidateDate.setDate(candidateDate.getDate() - offset);
-      const candidateDateStr = formatCompactDate(candidateDate);
-      if (await matcher(candidateDateStr)) {
-        return candidateDateStr;
-      }
-    }
-    return null;
-  }, []);
-
-  const findLatestGameDate = useCallback(async (leagueStr?: string) => {
-    const requestedLeague = (leagueStr || "ALL").toUpperCase();
-    const hasGamesForDate = async (dateStr: string) => {
-      try {
-        const resp = await apiClient.get(API.ESPN_ALL, {
-          params: { d: dateStr },
-        });
-        const games = filterGamesForLeague(resp.data.games || [], requestedLeague);
-        return games.length > 0;
-      } catch {
-        return false;
-      }
-    };
-
-    return findLatestMatchingDate(hasGamesForDate);
-  }, [findLatestMatchingDate]);
-
-  const findLatestActivityDate = useCallback(async (leagueStr?: string) => {
-    const requestedLeague = (leagueStr || "ALL").toUpperCase();
-    if (requestedLeague in latestActivityDateCacheRef.current) {
-      return latestActivityDateCacheRef.current[requestedLeague];
-    }
-
-    const hasActivityForDate = async (dateStr: string) => {
-      try {
-        const params: Record<string, string | number> = { date: dateStr, limit: 1 };
-        if (requestedLeague !== "ALL") {
-          params.league = requestedLeague;
-        }
-        const resp = await apiClient.get(API.ESPN_ACTIVITY, {
-          params,
-        });
-        return Number(resp.data.total || 0) > 0 || (Array.isArray(resp.data.activities) && resp.data.activities.length > 0);
-      } catch {
-        return false;
-      }
-    };
-
-    let latestGameDate: string | null | undefined;
-
-    try {
-      const params: Record<string, string | number> = {};
-      if (requestedLeague !== "ALL") {
-        params.league = requestedLeague;
-      }
-      const resp = await apiClient.get(API.ESPN_ACTIVITY_LATEST_DATE, { params });
-      const latestDate = typeof resp.data?.date === "string" && resp.data.date ? resp.data.date : null;
-      if (latestDate) {
-        latestGameDate = await findLatestGameDate(requestedLeague);
-        if (!latestGameDate || latestDate >= latestGameDate) {
-          latestActivityDateCacheRef.current[requestedLeague] = latestDate;
-          return latestDate;
-        }
-      }
-    } catch {
-      /* Fall back to the slower client-side scan if the helper endpoint is unavailable. */
-    }
-
-    const latestActivityDate = await findLatestMatchingDate(hasActivityForDate);
-    if (latestActivityDate) {
-      latestActivityDateCacheRef.current[requestedLeague] = latestActivityDate;
-      return latestActivityDate;
-    }
-
-    if (latestGameDate === undefined) {
-      latestGameDate = await findLatestGameDate(requestedLeague);
-    }
-    latestActivityDateCacheRef.current[requestedLeague] = latestGameDate;
-    return latestGameDate;
-  }, [findLatestGameDate, findLatestMatchingDate]);
-
   const fetchGameSummaryFallback = useCallback(async (dateStr?: string, leagueStr?: string) => {
     try {
       const resp = await apiClient.get(API.ESPN_ALL, {
@@ -1243,8 +1176,13 @@ export default function DashboardPage() {
       : fallbackActivities;
   }, [buildDashboardGameSummaryActivities, fetchGameSummaryFallback, loadSlateForDate]);
 
-  const loadActivityFeed = useCallback(async (dateStr?: string, leagueStr?: string): Promise<ActivityCacheEntry> => {
-    const cacheKey = buildActivityCacheKey(dateStr, leagueStr);
+  const loadActivityFeed = useCallback(async (
+    dateStr?: string,
+    leagueStr?: string,
+    statusFilter: "all" | "live" | "final" = "all",
+    fetchTargetCount: number = ACTIVITY_PAGE_SIZE,
+  ): Promise<ActivityCacheEntry> => {
+    const cacheKey = buildActivityCacheKey(dateStr, leagueStr, statusFilter, fetchTargetCount);
     const cachedEntry = activityResponseCacheRef.current[cacheKey];
     const cached = isFreshLiveActivityEntry(cacheKey, cachedEntry) ? cachedEntry : undefined;
     if (cached) {
@@ -1274,7 +1212,7 @@ export default function DashboardPage() {
     }
 
     if (!dateStr) {
-      const liveEntry = await fetchLiveActivityDirect(leagueStr);
+      const liveEntry = await fetchLiveActivityDirect(leagueStr, statusFilter, fetchTargetCount);
       if (liveEntry) {
         const hydratedEntry: ActivityCacheEntry = {
           ...liveEntry,
@@ -1296,8 +1234,9 @@ export default function DashboardPage() {
 
     let pageCount = 0;
     while (pageCount < MAX_ACTIVITY_FETCH_PAGES) {
+      const remainingCount = Math.max(fetchTargetCount - collectedActivities.length, ACTIVITY_PAGE_SIZE);
       const params: Record<string, string | number | boolean> = {
-        limit: ACTIVITY_FETCH_BATCH_SIZE,
+        limit: Math.min(ACTIVITY_FETCH_BATCH_SIZE, remainingCount),
         offset,
       };
       if (requestDate) {
@@ -1309,6 +1248,9 @@ export default function DashboardPage() {
       if (requestLeague) {
         params.league = requestLeague;
       }
+      if (statusFilter !== "all") {
+        params.status_filter = statusFilter;
+      }
 
       const resp = await apiClient.get(API.ESPN_ACTIVITY, { params });
       const activities = Array.isArray(resp.data.activities) ? resp.data.activities : [];
@@ -1316,7 +1258,7 @@ export default function DashboardPage() {
       collectedActivities.push(...activities);
 
       const hasMore = Boolean(resp.data.hasMore);
-      if (!hasMore || activities.length === 0) {
+      if (!hasMore || activities.length === 0 || collectedActivities.length >= fetchTargetCount) {
         break;
       }
       offset += activities.length;
@@ -1331,61 +1273,45 @@ export default function DashboardPage() {
     const parsed = parseActivities(collectedActivities, displayOrder);
 
     if (parsed.length === 0) {
-      if (requestDate) {
-        const fallbackGames = await buildFallbackActivitiesForDate(requestDate, leagueStr);
-        const fallbackEntry: ActivityCacheEntry = {
-          items: fallbackGames,
-          total: fallbackGames.length,
-          hasMore: false,
-          allItems: fallbackGames,
-          effectiveDate: requestDate,
-        };
-        setActivityCacheEntry(cacheKey, fallbackEntry);
-        return fallbackEntry;
-      }
-
-      const latestDate = await findLatestActivityDate(leagueStr);
-      if (latestDate && latestDate !== requestDate) {
-        const fallbackEntry = await loadActivityFeed(latestDate, leagueStr);
-        const latestEntry: ActivityCacheEntry = {
-          ...fallbackEntry,
-          effectiveDate: latestDate,
-        };
-        setActivityCacheEntry(cacheKey, latestEntry);
-        return latestEntry;
-      }
+      const emptyEntry: ActivityCacheEntry = {
+        items: [],
+        total: 0,
+        hasMore: false,
+        allItems: [],
+        effectiveDate: requestDate || "",
+      };
+      setActivityCacheEntry(cacheKey, emptyEntry);
+      return emptyEntry;
     }
 
     const entry: ActivityCacheEntry = {
       items: parsed,
       total: Math.max(total, parsed.length),
-      hasMore: false,
+      hasMore: parsed.length < total,
       allItems: parsed,
       effectiveDate: requestDate || "",
     };
     setActivityCacheEntry(cacheKey, entry);
     return entry;
   }, [
-    buildFallbackActivitiesForDate,
     fetchLiveActivityDirect,
-    findLatestActivityDate,
     parseActivities,
     persistActivityCache,
     setActivityCacheEntry,
   ]);
 
   const activityQuery = useQuery<ActivityCacheEntry>({
-    queryKey: ["dashboardActivity", activityRequestDate || "LIVE", activityLeague],
+    queryKey: ["dashboardActivity", activityRequestDate || "LIVE", activityLeague, activityStatusFilter, activityFetchTarget],
     queryFn: async () => {
       try {
-        return await loadActivityFeed(activityRequestDate || undefined, activityLeague);
+        return await loadActivityFeed(activityRequestDate || undefined, activityLeague, activityStatusFilter, activityFetchTarget);
       } catch {
         await warmApiConnection();
-        return loadActivityFeed(activityRequestDate || undefined, activityLeague);
+        return loadActivityFeed(activityRequestDate || undefined, activityLeague, activityStatusFilter, activityFetchTarget);
       }
     },
     initialData: (() => {
-      const cacheKey = buildActivityCacheKey(activityRequestDate || undefined, activityLeague);
+      const cacheKey = buildActivityCacheKey(activityRequestDate || undefined, activityLeague, activityStatusFilter, activityFetchTarget);
       const cachedEntry = activityResponseCacheRef.current[cacheKey];
       if (!cachedEntry?.items?.length || !isFreshLiveActivityEntry(cacheKey, cachedEntry)) {
         return undefined;
@@ -1714,7 +1640,7 @@ export default function DashboardPage() {
     () => activityAllItems.slice(0, activityVisibleCount),
     [activityAllItems, activityVisibleCount],
   );
-  const activityHasMore = activityAllItems.length > activityItems.length;
+  const activityHasMore = Boolean(activityQueryData?.hasMore) || activityAllItems.length > activityItems.length;
   const activityTotal = activityQueryData?.total ?? activityAllItems.length;
   const activityLoading = activityQuery.isLoading || (activityQuery.isFetching && !activityQueryData);
   const activityError = activityQuery.error instanceof Error
@@ -1722,15 +1648,6 @@ export default function DashboardPage() {
       ? "Live activity is temporarily unavailable because the API server is not responding."
       : "Live activity is temporarily unavailable right now."
     : "";
-  const activityDisplayOrder: ActivityDisplayOrder =
-    !activityEffectiveDate || activityEffectiveDate === formatCompactDate(new Date()) ? "recentFirst" : "chronological";
-  const activityLeagueFinalGames = useMemo(
-    () =>
-      games.filter(
-        (game) => game.status === "final" && (activityLeague === "ALL" || game.leagueKey === activityLeague),
-      ),
-    [activityLeague, games],
-  );
   const normalizeActivityItemsForDisplay = useCallback((items: ActivityItem[]) => {
     const gameLookup = new Map(games.map((game) => [game.id, game]));
     return items.map((item) => {
@@ -1760,66 +1677,20 @@ export default function DashboardPage() {
       };
     });
   }, [games, isSavedMatchup]);
-  const mergeActivityFinalSummaries = useCallback((
-    items: ActivityItem[],
-    feedFullyLoaded: boolean,
-  ) => {
-    if (!activityLeagueFinalGames.length || !feedFullyLoaded) {
-      return items;
-    }
-
-    const existingFinalGameIds = new Set(
-      items
-        .filter((item) => item.status === "final")
-        .map((item) => item.gameId || item.id),
-    );
-    const missingFinalSummaries = buildDashboardGameSummaryActivities(activityLeagueFinalGames)
-      .filter((item) => !existingFinalGameIds.has(item.gameId || item.id));
-
-    if (!missingFinalSummaries.length) {
-      return items;
-    }
-
-    return sortActivitiesForDisplay(
-      [...items, ...missingFinalSummaries],
-      activityDisplayOrder,
-    );
-  }, [activityDisplayOrder, activityLeagueFinalGames, buildDashboardGameSummaryActivities]);
-  const activityFeedFullyLoaded = activityAllItems.length > 0 && !activityHasMore;
   const displayActivityAllItems = useMemo(() => {
-    return mergeActivityFinalSummaries(
-      normalizeActivityItemsForDisplay(activityAllItems),
-      activityFeedFullyLoaded,
-    );
+    return normalizeActivityItemsForDisplay(activityAllItems);
   }, [
     activityAllItems,
-    activityFeedFullyLoaded,
-    mergeActivityFinalSummaries,
     normalizeActivityItemsForDisplay,
   ]);
   const displayActivityItems = useMemo(() => {
-    return mergeActivityFinalSummaries(
-      normalizeActivityItemsForDisplay(activityItems),
-      activityFeedFullyLoaded,
-    );
+    return normalizeActivityItemsForDisplay(activityItems);
   }, [
     activityItems,
-    activityFeedFullyLoaded,
-    mergeActivityFinalSummaries,
     normalizeActivityItemsForDisplay,
   ]);
-  const fallbackActivityItems = useMemo(() => {
-    const relevantGames = games.filter(
-      (game) => activityLeague === "ALL" || game.leagueKey === activityLeague,
-    );
-    return buildDashboardGameSummaryActivities(relevantGames).slice(0, ACTIVITY_PAGE_SIZE);
-  }, [activityLeague, buildDashboardGameSummaryActivities, games]);
-  const effectiveActivityAllItems =
-    displayActivityAllItems.length > 0 ? displayActivityAllItems : fallbackActivityItems;
-  const effectiveActivityItems =
-    displayActivityItems.length > 0
-      ? displayActivityItems
-      : fallbackActivityItems.slice(0, activityVisibleCount);
+  const effectiveActivityAllItems = displayActivityAllItems;
+  const effectiveActivityItems = displayActivityItems;
   const activityDisplayTotal = useMemo(
     () => Math.max(activityTotal, effectiveActivityItems.length),
     [activityTotal, effectiveActivityItems.length],

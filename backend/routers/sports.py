@@ -6548,6 +6548,7 @@ async def espn_activity(
     offset: int = Query(default=0, description="Offset for pagination (0-based)"),
     limit: int = Query(default=500, description="Max plays per response"),
     league: str = Query(default=None, description="Filter by league key (e.g. NBA, EPL)"),
+    status_filter: str = Query(default="all", description="Filter plays by status: all, live, or final"),
     live_day: bool = Query(default=False, description="Treat the requested date as the current live day even after server midnight"),
 ):
     """
@@ -6561,6 +6562,14 @@ async def espn_activity(
     is_today = live_day or (target_date == today)
     is_future = target_date > today
     scope = _activity_cache_scope(league)
+    normalized_status_filter = (status_filter or "all").strip().lower()
+    if normalized_status_filter not in {"all", "live", "final"}:
+        normalized_status_filter = "all"
+
+    def apply_status_filter(plays: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if normalized_status_filter == "all":
+            return plays
+        return [play for play in plays if str(play.get("status") or "").lower() == normalized_status_filter]
 
     if is_future:
         return {
@@ -6577,7 +6586,7 @@ async def espn_activity(
     if is_today:
         cached_today = _today_activity_cache.get((ACTIVITY_CACHE_VERSION, target_date, scope))
         if cached_today and time.time() - cached_today[0] < TODAY_ACTIVITY_CACHE_TTL:
-            today_plays = cached_today[1]
+            today_plays = apply_status_filter(cached_today[1])
             page = today_plays[offset : offset + limit]
             return {
                 "activities": [_strip_activity_fields(play) for play in page],
@@ -6593,6 +6602,7 @@ async def espn_activity(
         if all_plays is not None:
             if league:
                 all_plays = [p for p in all_plays if p.get("league") == league.upper()]
+            all_plays = apply_status_filter(all_plays)
             page = all_plays[offset : offset + limit]
             return {
                 "activities": [_strip_activity_fields(play) for play in page],
@@ -6723,6 +6733,8 @@ async def espn_activity(
     # Apply league filter for live fetches (when we fetched all leagues)
     if league and not (league.upper() in LEAGUES and len(league_keys) == 1):
         all_plays = [p for p in all_plays if p.get("league") == league.upper()]
+
+    all_plays = apply_status_filter(all_plays)
 
     # Apply pagination
     total = len(all_plays)
