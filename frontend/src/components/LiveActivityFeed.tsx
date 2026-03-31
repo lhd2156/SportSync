@@ -645,8 +645,13 @@ void formatDisplayActivityMeta;
 
 function formatRenderedActivityMeta(item: FeedItem): string {
   const detail = cleanValue(item.statusDetail);
+  const detailLooksFinal = /^(final|full time)$/i.test(detail);
   const base = item.status === "final"
-    ? (detail ? `${item.league} | ${detail} | Final` : `${item.league} | Final`)
+    ? (detail
+        ? detailLooksFinal
+          ? `${item.league} | Final`
+          : `${item.league} | ${detail} | Final`
+        : `${item.league} | Final`)
     : (detail ? `${item.league} | ${detail}` : item.league);
 
   return normalizeSafeDisplay(base)
