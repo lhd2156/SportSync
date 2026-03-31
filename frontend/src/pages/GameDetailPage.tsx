@@ -2674,7 +2674,8 @@ function GameOverviewTab({
           awayTeam={game.awayAbbr || game.awayTeam}
           homeWinProb={prediction.home_win_prob}
           awayWinProb={prediction.away_win_prob}
-          modelVersion={prediction.model_version}
+          gameStatus={game.status}
+          updatedAt={prediction.created_at}
         />
       ) : null}
       <LeadersTab leaders={leaders} homeDetail={homeDetail} awayDetail={awayDetail} league={game.league} />
