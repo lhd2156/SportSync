@@ -66,11 +66,13 @@ const GAME_SLATE_CACHE_STORAGE_KEY = "sportsync_game_slate_cache_v3";
 const DASHBOARD_NEWS_CACHE_STORAGE_KEY = "sportsync_dashboard_news_cache_v1";
 const DASHBOARD_FEATURED_CACHE_STORAGE_KEY = "sportsync_dashboard_featured_cache_v1";
 const LIVE_DASHBOARD_REFRESH_MS = 12_000;
+const LIVE_ACTIVITY_CACHE_TTL_MS = 6_000;
 const LIVE_PREDICTION_CACHE_TTL_MS = 12_000;
 const DASHBOARD_NEWS_CACHE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FEATURED_CACHE_TTL_MS = 60_000;
 const MAX_ACTIVITY_FETCH_PAGES = 30;
 const API_WARM_RETRY_TIMEOUT_MS = 4_000;
+const FUTURE_ACTIVITY_CACHE_TTL_MS = 5 * 60_000;
 
 const warmedDashboardImageUrls = new Set<string>();
 
@@ -329,18 +331,27 @@ function isFreshLiveActivityEntry(cacheKey: string, entry?: ActivityCacheEntry |
     return false;
   }
 
+  const cachedAt = typeof entry.cachedAt === "number" ? entry.cachedAt : 0;
+  const ageMs = cachedAt > 0 ? Date.now() - cachedAt : Number.POSITIVE_INFINITY;
+  const currentActivityDay = getCurrentActivityDay();
+  const explicitDate = cacheKey.split("::").pop() || "";
+
   if (!isLiveActivityCacheKey(cacheKey)) {
-    const explicitDate = cacheKey.split("::").pop() || "";
     if (isFutureCompactDate(explicitDate)) {
-      const cachedToday = entry.cachedForDay === getCurrentActivityDay();
+      const cachedToday = entry.cachedForDay === currentActivityDay;
       const scheduleOnly = entry.items.every((item) => item.playType === "Scheduled Game");
-      const freshEnough = typeof entry.cachedAt === "number" && Date.now() - entry.cachedAt < 5 * 60 * 1000;
+      const freshEnough = ageMs < FUTURE_ACTIVITY_CACHE_TTL_MS;
       return cachedToday && scheduleOnly && freshEnough;
     }
+
+    if (explicitDate === currentActivityDay) {
+      return entry.cachedForDay === currentActivityDay && ageMs < LIVE_ACTIVITY_CACHE_TTL_MS;
+    }
+
     return true;
   }
 
-  return entry.cachedForDay === getCurrentActivityDay();
+  return entry.cachedForDay === currentActivityDay && ageMs < LIVE_ACTIVITY_CACHE_TTL_MS;
 }
 
 function getActivityBoundaryRank(item: ActivityItem): number {
@@ -1389,7 +1400,7 @@ export default function DashboardPage() {
     initialData: (() => {
       const cacheKey = buildActivityCacheKey(activityRequestDate || undefined, activityLeague);
       const cachedEntry = activityResponseCacheRef.current[cacheKey];
-      if (!cachedEntry?.items?.length) {
+      if (!cachedEntry?.items?.length || !isFreshLiveActivityEntry(cacheKey, cachedEntry)) {
         return undefined;
       }
       return {
