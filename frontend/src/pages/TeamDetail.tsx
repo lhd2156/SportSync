@@ -589,8 +589,6 @@ export default function TeamDetail() {
       });
     };
 
-    const PREDICTION_CHUNK_SIZE = 4;
-
     const fetchBatch = async (games: TeamScheduleGame[]) => {
       if (!games.length) {
         return new Set<string>();
@@ -644,52 +642,34 @@ export default function TeamDetail() {
     };
 
     const fetchQueued = async (games: TeamScheduleGame[]) => {
-      for (let index = 0; index < games.length; index += PREDICTION_CHUNK_SIZE) {
-        if (controller.signal.aborted) return;
-        const chunk = games.slice(index, index + PREDICTION_CHUNK_SIZE);
-        const fetchedIds = await fetchBatch(chunk);
-        if (controller.signal.aborted) return;
-        const remainingChunk = chunk.filter((game) => !fetchedIds.has(game.id));
-        const results = await Promise.allSettled(
-          remainingChunk.map(async (game) => {
-            const response = await apiClient.get(`${API.PREDICT}/${game.id}`, {
-              params: { league: predictionLeague },
-              signal: controller.signal,
-            });
-            return {
-              game,
-              prediction: normalizePrediction(response.data as Record<string, unknown>),
-            };
-          }),
-        );
-        if (controller.signal.aborted) return;
+      if (!games.length || controller.signal.aborted) return;
+      const fetchedIds = await fetchBatch(games);
+      if (controller.signal.aborted) return;
+      const remainingGames = games.filter((game) => !fetchedIds.has(game.id));
 
+      if (remainingGames.length) {
         const updates: Record<string, PredictionData | null> = {};
-        results.forEach((result, chunkIndex) => {
-          const game = remainingChunk[chunkIndex];
-          if (!game) return;
-          if (result.status === "fulfilled") {
-            updates[game.id] = result.value.prediction;
-            setPredictionCacheEntry(game.id, {
-              fetchedAt: Date.now(),
-              fingerprint: getPredictionCacheFingerprint(game),
-              data: result.value.prediction,
-            });
-          } else {
-            setPredictionCacheEntry(game.id, {
-              fetchedAt: Date.now(),
-              fingerprint: getPredictionCacheFingerprint(game),
-              data: null,
-            });
-          }
+        remainingGames.forEach((game) => {
+          const fallbackPrediction = normalizePrediction({
+            game_id: game.id,
+            home_win_prob: 0.5,
+            away_win_prob: 0.5,
+            model_version: "fallback_v1",
+          });
+          updates[game.id] = fallbackPrediction;
+          setPredictionCacheEntry(game.id, {
+            fetchedAt: Date.now(),
+            fingerprint: getPredictionCacheFingerprint(game),
+            data: fallbackPrediction,
+          });
         });
 
         if (Object.keys(updates).length) {
           setPredictionByGameId((prev) => ({ ...prev, ...updates }));
         }
-
-        clearLoadingIds(chunk.map((game) => game.id));
       }
+
+      clearLoadingIds(games.map((game) => game.id));
     };
 
     void fetchQueued(gamesToFetch);

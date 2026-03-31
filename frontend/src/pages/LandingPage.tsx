@@ -899,27 +899,6 @@ export default function LandingPage() {
 
     let cancelled = false;
 
-    const fetchSinglePrediction = async (game: ESPNGame) => {
-      try {
-        const response = await apiClient.get(`${API.PREDICT}/${game.id}`, {
-          params: { league: game.league },
-          timeout: 6_000,
-        });
-
-        return {
-          gameId: game.id,
-          prediction: {
-            gameId: String(response.data?.game_id || game.id),
-            homeWinProb: Number(response.data?.home_win_prob || 0),
-            awayWinProb: Number(response.data?.away_win_prob || 0),
-            modelVersion: String(response.data?.model_version || ""),
-          } satisfies PredictionResult,
-        };
-      } catch {
-        return { gameId: game.id, prediction: buildFallbackPrediction(game) };
-      }
-    };
-
     const fetchPredictions = async () => {
       setPredictionLoadingIds((prev) => {
         const next = new Set(prev);
@@ -960,16 +939,8 @@ export default function LandingPage() {
       }
 
       if (unresolvedGames.size) {
-        const results = await Promise.allSettled(
-          Array.from(unresolvedGames.values()).map((game) => fetchSinglePrediction(game)),
-        );
-
-        results.forEach((result) => {
-          if (result.status !== "fulfilled") {
-            return;
-          }
-
-          nextPredictions[result.value.gameId] = result.value.prediction;
+        Array.from(unresolvedGames.values()).forEach((game) => {
+          nextPredictions[game.id] = buildFallbackPrediction(game);
         });
       }
 

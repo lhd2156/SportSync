@@ -1537,9 +1537,7 @@ export default function DashboardPage() {
     let cancelled = false;
     let deferredTimer: number | null = null;
 
-    const PREDICTION_TIMEOUT_MS = 8_000;
     const PRIORITY_PREDICTION_COUNT = 16;
-    const PREDICTION_CHUNK_SIZE = 4;
     const PREDICTION_BATCH_SIZE = 18;
     const DEFERRED_PREDICTION_DELAY_MS = 150;
     const clearPredictionLoading = (batchGames: GameItem[]) => {
@@ -1564,34 +1562,8 @@ export default function DashboardPage() {
       return next;
     });
 
-    async function fetchWithTimeout(game: GameItem) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), PREDICTION_TIMEOUT_MS);
-      try {
-        const response = await apiClient.get(`${API.PREDICT}/${game.id}`, {
-          params: { league: game.leagueKey },
-          signal: controller.signal,
-        });
-        const prediction: PredictionResult = {
-          gameId: String(response.data.game_id),
-          homeWinProb: Number(response.data.home_win_prob || 0),
-          awayWinProb: Number(response.data.away_win_prob || 0),
-          modelVersion: String(response.data.model_version || ""),
-        };
-        return { gameId: game.id, prediction, ok: true as const };
-      } catch {
-        return {
-          gameId: game.id,
-          prediction: buildFallbackPrediction(game),
-          ok: true as const,
-        };
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-
     /* Try the batch endpoint first — all predictions in one request.
-       Falls back to per-game fetching if the batch endpoint fails. */
+       Falls back to client-side estimates instead of hammering per-game endpoints. */
     async function fetchBatch(batchGames: GameItem[]) {
       if (!batchGames.length) {
         return new Set<string>();
@@ -1639,40 +1611,27 @@ export default function DashboardPage() {
       return new Set<string>();
     }
 
-    async function fetchQueued(queueGames: GameItem[]) {
+    function fillFallbackPredictions(queueGames: GameItem[]) {
       if (!queueGames.length || cancelled) {
         return;
       }
 
-      for (let index = 0; index < queueGames.length; index += PREDICTION_CHUNK_SIZE) {
-        if (cancelled) return;
-        const chunk = queueGames.slice(index, index + PREDICTION_CHUNK_SIZE);
-        const results = await Promise.allSettled(chunk.map(fetchWithTimeout));
-        if (cancelled) return;
-
-        const updates: Record<string, PredictionResult | null> = {};
-        results.forEach((result) => {
-          if (result.status !== "fulfilled") return;
-          const { gameId, prediction, ok } = result.value;
-          const game = chunk.find((g) => g.id === gameId);
-          if (!game) return;
-          const fingerprint = getPredictionCacheFingerprint(game);
-          if (ok) {
-            setPredictionCacheEntry(gameId, {
-              fetchedAt: Date.now(),
-              fingerprint,
-              data: prediction,
-            });
-            updates[gameId] = prediction;
-          }
+      const updates: Record<string, PredictionResult | null> = {};
+      queueGames.forEach((game) => {
+        const fallbackPrediction = buildFallbackPrediction(game);
+        setPredictionCacheEntry(game.id, {
+          fetchedAt: Date.now(),
+          fingerprint: getPredictionCacheFingerprint(game),
+          data: fallbackPrediction,
         });
+        updates[game.id] = fallbackPrediction;
+      });
 
-        if (Object.keys(updates).length > 0) {
-          setPredictionsByGame((prev) => ({ ...prev, ...updates }));
-        }
-
-        clearPredictionLoading(chunk);
+      if (Object.keys(updates).length > 0) {
+        setPredictionsByGame((prev) => ({ ...prev, ...updates }));
       }
+
+      clearPredictionLoading(queueGames);
     }
 
     (async () => {
@@ -1694,7 +1653,7 @@ export default function DashboardPage() {
             continue;
           }
 
-          await fetchQueued(remainingGames);
+          fillFallbackPredictions(remainingGames);
           clearPredictionLoading(chunk);
         }
       };
