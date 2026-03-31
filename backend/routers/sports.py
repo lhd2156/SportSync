@@ -6493,6 +6493,7 @@ async def espn_activity(
     offset: int = Query(default=0, description="Offset for pagination (0-based)"),
     limit: int = Query(default=500, description="Max plays per response"),
     league: str = Query(default=None, description="Filter by league key (e.g. NBA, EPL)"),
+    live_day: bool = Query(default=False, description="Treat the requested date as the current live day even after server midnight"),
 ):
     """
     Activity feed — full play-by-play timeline using ESPN summary API.
@@ -6502,7 +6503,7 @@ async def espn_activity(
     """
     today = datetime.now().strftime("%Y%m%d")
     target_date = date or today
-    is_today = (target_date == today)
+    is_today = live_day or (target_date == today)
     is_future = target_date > today
     scope = _activity_cache_scope(league)
 
