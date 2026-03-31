@@ -58,6 +58,7 @@ const LEAGUE_PRIORITY: Record<string, number> = {
   NFL: 0, NBA: 1, MLB: 2, NHL: 3, EPL: 4,
 };
 const ACTIVITY_PAGE_SIZE = 40;
+const ACTIVITY_FETCH_BATCH_SIZE = 500;
 const ACTIVITY_DISPLAY_CACHE_VERSION = "v19";
 const ACTIVITY_CACHE_STORAGE_KEY = `sportsync_activity_cache_${ACTIVITY_DISPLAY_CACHE_VERSION}`;
 const PREDICTION_CACHE_STORAGE_KEY = "sportsync_prediction_cache_v2";
@@ -68,7 +69,7 @@ const LIVE_DASHBOARD_REFRESH_MS = 12_000;
 const LIVE_PREDICTION_CACHE_TTL_MS = 12_000;
 const DASHBOARD_NEWS_CACHE_TTL_MS = 10 * 60_000;
 const DASHBOARD_FEATURED_CACHE_TTL_MS = 60_000;
-const ACTIVITY_PREFETCH_PAGE_LIMIT = 2;
+const MAX_ACTIVITY_FETCH_PAGES = 30;
 const API_WARM_RETRY_TIMEOUT_MS = 4_000;
 
 const warmedDashboardImageUrls = new Set<string>();
@@ -963,62 +964,50 @@ export default function DashboardPage() {
     }
 
     const requestPromise = (async () => {
-      const scoreboardResp = await apiClient.get(API.ESPN_ALL, {
-        params: { d: todayStr },
-      });
+      const collectedActivities: Record<string, unknown>[] = [];
+      let total = 0;
+      let offset = 0;
+      let pageCount = 0;
 
-      const activeGames = filterGamesForLeague(scoreboardResp.data.games || [], leagueStr).filter(
-        (game) => game.status === "live" || game.status === "final",
-      );
+      while (pageCount < MAX_ACTIVITY_FETCH_PAGES) {
+        const params: Record<string, string | number | boolean> = {
+          date: todayStr,
+          live_day: true,
+          limit: ACTIVITY_FETCH_BATCH_SIZE,
+          offset,
+        };
+        if (leagueStr && leagueStr !== "ALL") {
+          params.league = leagueStr;
+        }
 
-      if (!activeGames.length) {
+        const resp = await apiClient.get(API.ESPN_ACTIVITY, { params });
+        const activities = Array.isArray(resp.data.activities) ? resp.data.activities : [];
+        total = Math.max(total, Number(resp.data.total || 0), collectedActivities.length + activities.length);
+        collectedActivities.push(...activities);
+
+        const hasMore = Boolean(resp.data.hasMore);
+        if (!hasMore || activities.length === 0) {
+          break;
+        }
+
+        offset += activities.length;
+        pageCount += 1;
+        if (activities.length < ACTIVITY_FETCH_BATCH_SIZE) {
+          break;
+        }
+      }
+
+      const parsed = parseActivities(collectedActivities, "recentFirst");
+      if (!parsed.length) {
         return null;
       }
 
-      const activityGameSummaries = buildGameSummaryActivities(activeGames);
-
-      const gamePayloads = await Promise.allSettled(
-        activeGames.map(async (game) => {
-          const response = await apiClient.get(`${API.ESPN_GAME}/${game.id}`, { timeout: 2500 });
-          return Array.isArray(response.data?.plays) ? response.data.plays : [];
-        }),
-      );
-
-      const combined = gamePayloads.flatMap((result) => {
-        if (result.status !== "fulfilled" || !Array.isArray(result.value)) {
-          return [];
-        }
-        return result.value;
-      });
-
-      if (!combined.length) {
-        if (!activityGameSummaries.length) {
-          return null;
-        }
-        return {
-          items: activityGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
-          total: activityGameSummaries.length,
-          hasMore: activityGameSummaries.length > ACTIVITY_PAGE_SIZE,
-          allItems: activityGameSummaries,
-        } as ActivityCacheEntry;
-      }
-
-      const parsed = parseActivities(combined, "recentFirst");
-      if (!parsed.length && activityGameSummaries.length) {
-        return {
-          items: activityGameSummaries.slice(0, ACTIVITY_PAGE_SIZE),
-          total: activityGameSummaries.length,
-          hasMore: activityGameSummaries.length > ACTIVITY_PAGE_SIZE,
-          allItems: activityGameSummaries,
-        } as ActivityCacheEntry;
-      }
-
-      const visible = parsed.slice(0, ACTIVITY_PAGE_SIZE);
       return {
-        items: visible,
-        total: parsed.length,
-        hasMore: parsed.length > ACTIVITY_PAGE_SIZE,
+        items: parsed,
+        total: Math.max(total, parsed.length),
+        hasMore: false,
         allItems: parsed,
+        effectiveDate: "",
       } as ActivityCacheEntry;
     })();
 
@@ -1028,7 +1017,7 @@ export default function DashboardPage() {
     } finally {
       delete liveActivityRequestPromiseRef.current[requestKey];
     }
-  }, [buildGameSummaryActivities, parseActivities]);
+  }, [parseActivities]);
 
   const latestActivityDateCacheRef = useRef<Record<string, string | null>>({});
   const activityResponseCacheRef = useRef<Record<string, ActivityCacheEntry>>(
@@ -1301,18 +1290,23 @@ export default function DashboardPage() {
 
     const requestLeague = leagueStr && leagueStr !== "ALL" ? leagueStr : undefined;
     const requestDate = dateStr || undefined;
+    const localTodayKey = formatCompactDate(new Date());
+    const isCurrentDayRequest = requestDate === localTodayKey;
     const collectedActivities: Record<string, unknown>[] = [];
     let total = 0;
     let offset = 0;
 
     let pageCount = 0;
-    while (pageCount < ACTIVITY_PREFETCH_PAGE_LIMIT) {
-      const params: Record<string, string | number> = {
-        limit: ACTIVITY_PAGE_SIZE,
+    while (pageCount < MAX_ACTIVITY_FETCH_PAGES) {
+      const params: Record<string, string | number | boolean> = {
+        limit: ACTIVITY_FETCH_BATCH_SIZE,
         offset,
       };
       if (requestDate) {
         params.date = requestDate;
+        if (isCurrentDayRequest) {
+          params.live_day = true;
+        }
       }
       if (requestLeague) {
         params.league = requestLeague;
@@ -1329,13 +1323,13 @@ export default function DashboardPage() {
       }
       offset += activities.length;
       pageCount += 1;
-      if (activities.length < ACTIVITY_PAGE_SIZE) {
+      if (activities.length < ACTIVITY_FETCH_BATCH_SIZE) {
         break;
       }
     }
 
     const displayOrder: ActivityDisplayOrder =
-      !requestDate || requestDate === formatCompactDate(new Date()) ? "recentFirst" : "chronological";
+      !requestDate || isCurrentDayRequest ? "recentFirst" : "chronological";
     const parsed = parseActivities(collectedActivities, displayOrder);
 
     if (parsed.length === 0) {

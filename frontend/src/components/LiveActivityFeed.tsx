@@ -1233,6 +1233,8 @@ export default function LiveActivityFeed({
   const setStatusFilter = onStatusFilterChange || setLocalStatusFilter;
   // Compute today's date fresh each render so it updates when midnight rolls over
   const todayInputValue = getTodayDateInputValue();
+  const todayActivityDate = getTodayActivityDate();
+  const isCurrentDayView = !activityDate || activityDate === todayActivityDate;
   const resolvedDateInputValue = useMemo(
     () => formatDateInputValue(activityDate) || todayInputValue,
     [activityDate, todayInputValue],
@@ -1464,7 +1466,7 @@ export default function LiveActivityFeed({
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="flex items-center gap-2 mr-auto">
           <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">
-            {activityDate ? `Activity — ${formatDateLabel(activityDate)}` : "Live Activity"}
+            {isCurrentDayView ? "Live Activity" : `Activity — ${formatDateLabel(activityDate)}`}
           </h2>
           <input
             type="text"
@@ -1607,9 +1609,9 @@ export default function LiveActivityFeed({
             <div className="min-h-[420px] lg:min-h-[520px] p-8 flex flex-col items-center justify-center gap-2">
               <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
               <p className="text-xs text-muted">
-                Loading{leagueFilter !== "ALL" ? ` ${leagueFilter}` : ""} plays{activityDate ? ` for ${formatDateLabel(activityDate)}` : ""}...
+                Loading{leagueFilter !== "ALL" ? ` ${leagueFilter}` : ""} plays{isCurrentDayView ? "" : ` for ${formatDateLabel(activityDate)}`}...
               </p>
-              {activityDate && <p className="text-[10px] text-muted/60">First load of a historical date may take 10-15s</p>}
+              {!isCurrentDayView && <p className="text-[10px] text-muted/60">First load of a historical date may take 10-15s</p>}
             </div>
           ) : error && items.length === 0 ? (
             <div className="min-h-[420px] lg:min-h-[520px] p-8 flex flex-col items-center justify-center gap-2 text-center">
@@ -1635,10 +1637,10 @@ export default function LiveActivityFeed({
                     }
                   }
                   return teamFilter === "my-teams"
-                    ? "No activity for your saved teams" + (activityDate ? ` on ${formatDateLabel(activityDate)}.` : " right now.")
+                    ? "No activity for your saved teams" + (isCurrentDayView ? " right now." : ` on ${formatDateLabel(activityDate)}.`)
                     : leagueFilter !== "ALL"
-                      ? `No ${leagueFilter} plays` + (activityDate ? ` on ${formatDateLabel(activityDate)}.` : " right now.")
-                      : activityDate
+                      ? `No ${leagueFilter} plays` + (isCurrentDayView ? " right now." : ` on ${formatDateLabel(activityDate)}.`)
+                      : !isCurrentDayView
                         ? `No plays found for ${formatDateLabel(activityDate)}.`
                         : "No live activity right now. Check back during game time.";
                 })()}</p>
