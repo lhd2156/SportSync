@@ -13,7 +13,8 @@ type PredictionWidgetProps = {
   awayTeam: string;
   homeWinProb: number;
   awayWinProb: number;
-  modelVersion: string;
+  gameStatus?: string;
+  updatedAt?: string;
 };
 
 function PredictionWidget({
@@ -21,9 +22,14 @@ function PredictionWidget({
   awayTeam,
   homeWinProb,
   awayWinProb,
-  modelVersion,
+  gameStatus,
+  updatedAt,
 }: PredictionWidgetProps) {
   const { homePct, awayPct } = getDisplayPercentages(homeWinProb, awayWinProb);
+  const isLiveGame = String(gameStatus || "").toLowerCase() === "live";
+  const formattedUpdatedAt = updatedAt
+    ? new Date(updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : null;
   const data = [
     { team: homeTeam, probability: homePct, isHome: true },
     { team: awayTeam, probability: awayPct, isHome: false },
@@ -56,7 +62,10 @@ function PredictionWidget({
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <p className="text-xs text-muted mt-2">Model: {modelVersion}</p>
+      <p className="text-xs text-muted mt-2">
+        {isLiveGame ? "Updates automatically during live games." : "Based on the current game state."}
+        {formattedUpdatedAt ? ` Last updated at ${formattedUpdatedAt}.` : ""}
+      </p>
     </div>
   );
 }
