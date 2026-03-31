@@ -56,6 +56,8 @@ type LiveActivityFeedProps = {
   error?: string;
   activeLeague?: string;         // controlled league filter from parent
   onLeagueChange?: (league: string) => void;  // notify parent of league change
+  statusFilter?: "all" | "live" | "final";
+  onStatusFilterChange?: (status: "all" | "live" | "final") => void;
   savedTeams?: SavedTeamSummary[];
 };
 
@@ -1205,13 +1207,30 @@ const PlayRow = memo(function PlayRow({
   );
 });
 
-export default function LiveActivityFeed({ items, allItems, activityDate, onDateChange, hasMore, onLoadMore, total, loading, error, activeLeague, onLeagueChange, savedTeams = [] }: LiveActivityFeedProps) {
+export default function LiveActivityFeed({
+  items,
+  allItems,
+  activityDate,
+  onDateChange,
+  hasMore,
+  onLoadMore,
+  total,
+  loading,
+  error,
+  activeLeague,
+  onLeagueChange,
+  statusFilter: controlledStatusFilter,
+  onStatusFilterChange,
+  savedTeams = [],
+}: LiveActivityFeedProps) {
   const [teamFilter, setTeamFilter] = useState<"all" | "my-teams">("all");
   // Use controlled league filter if parent provides it, otherwise local state
   const [localLeague, setLocalLeague] = useState<string>("ALL");
   const leagueFilter = activeLeague !== undefined ? activeLeague : localLeague;
   const setLeagueFilter = onLeagueChange || setLocalLeague;
-  const [statusFilter, setStatusFilter] = useState<"all" | "live" | "final">("all");
+  const [localStatusFilter, setLocalStatusFilter] = useState<"all" | "live" | "final">("all");
+  const statusFilter = controlledStatusFilter ?? localStatusFilter;
+  const setStatusFilter = onStatusFilterChange || setLocalStatusFilter;
   // Compute today's date fresh each render so it updates when midnight rolls over
   const todayInputValue = getTodayDateInputValue();
   const resolvedDateInputValue = useMemo(
