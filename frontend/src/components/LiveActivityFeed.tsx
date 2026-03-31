@@ -733,7 +733,10 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
     ? `${API_BASE_URL}${API.ESPN_HEADSHOT}?${fallbackParams.toString()}`
     : "";
   const isPremierLeagueHeadshot = cleanSrc.includes("resources.premierleague.com/premierleague");
-  const prefersDirectOfficialHeadshot = isOfficialHeadshotUrl(cleanSrc);
+  const prefersDirectOfficialHeadshot =
+    isOfficialHeadshotUrl(cleanSrc) ||
+    cleanLeagueKey === "MLB" ||
+    isPremierLeagueHeadshot;
 
   if (!cleanSrc) {
     add(proxyUrl);
@@ -741,27 +744,13 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
     return sources;
   }
 
-  if (isPremierLeagueHeadshot) {
-    add(proxyUrl);
-    add(proxyFallbackUrl);
-    add(cleanSrc);
-    return sources;
-  }
-
-  if (cleanLeagueKey === "MLB") {
-    add(proxyUrl);
-    add(proxyFallbackUrl);
-    add(cleanSrc);
-    return sources;
-  }
-
-  add(proxyUrl);
-  add(proxyFallbackUrl);
   if (prefersDirectOfficialHeadshot) {
     add(cleanSrc);
   }
+  add(proxyUrl);
+  add(proxyFallbackUrl);
 
-  if (isOfficialHeadshotUrl(cleanSrc) && !prefersDirectOfficialHeadshot) {
+  if (!prefersDirectOfficialHeadshot) {
     add(cleanSrc);
   }
 
@@ -780,6 +769,8 @@ function buildHeadshotSources(src: string, name: string, league?: string, teamNa
 
   return sources;
 }
+
+const HEADSHOT_LOAD_TIMEOUT_MS = 1800;
 
 const HeadshotImg = memo(function HeadshotImg({
   src,
@@ -806,16 +797,19 @@ const HeadshotImg = memo(function HeadshotImg({
   );
   const [resolvedSrc, setResolvedSrc] = useState("");
   const [isReady, setIsReady] = useState(false);
+  const [renderFailed, setRenderFailed] = useState(false);
 
   useEffect(() => {
     if (!imageSources.length) {
       setResolvedSrc("");
       setIsReady(true);
+      setRenderFailed(false);
       return;
     }
     let cancelled = false;
     setResolvedSrc("");
     setIsReady(false);
+    setRenderFailed(false);
 
     if (failedHeadshotChains.has(sourceKey)) {
       setIsReady(true);
@@ -839,15 +833,29 @@ const HeadshotImg = memo(function HeadshotImg({
       }
 
       const img = new Image();
+      let settled = false;
+      const finish = (next: () => void) => {
+        if (settled || cancelled) return;
+        settled = true;
+        next();
+      };
+      const timeoutId = window.setTimeout(() => {
+        finish(() => resolveCandidate(index + 1));
+      }, HEADSHOT_LOAD_TIMEOUT_MS);
       img.referrerPolicy = "no-referrer";
       img.onload = () => {
-        if (cancelled) return;
-        loadedHeadshotSources.add(candidate);
-        failedHeadshotChains.delete(sourceKey);
-        setResolvedSrc(candidate);
-        setIsReady(true);
+        window.clearTimeout(timeoutId);
+        finish(() => {
+          loadedHeadshotSources.add(candidate);
+          failedHeadshotChains.delete(sourceKey);
+          setResolvedSrc(candidate);
+          setIsReady(true);
+        });
       };
-      img.onerror = () => resolveCandidate(index + 1);
+      img.onerror = () => {
+        window.clearTimeout(timeoutId);
+        finish(() => resolveCandidate(index + 1));
+      };
       img.src = candidate;
     };
 
@@ -862,7 +870,7 @@ const HeadshotImg = memo(function HeadshotImg({
     ? "scale-[1.05] object-cover object-top"
     : "scale-[1.16] object-cover object-center";
 
-  if (!resolvedSrc) {
+  if (!resolvedSrc || renderFailed) {
     if (!isReady) {
       return (
         <div className={`${className} surface-avatar-loading`}>
@@ -899,6 +907,10 @@ const HeadshotImg = memo(function HeadshotImg({
         className={`h-full w-full ${imageSizingClass} img-fade-in`}
         loading="lazy"
         referrerPolicy="no-referrer"
+        onError={() => {
+          failedHeadshotChains.add(sourceKey);
+          setRenderFailed(true);
+        }}
       />
     </div>
   );
