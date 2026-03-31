@@ -624,10 +624,11 @@ function parseEPLPresentation(item: FeedItem, text: string): Partial<DisplayFeed
 
 function formatActivityMeta(item: FeedItem): string {
   const detail = cleanValue(item.statusDetail);
-  if (item.status === "final") {
-    return detail ? `${item.league} · ${detail} · Final` : `${item.league} · Final`;
+  const detailLooksFinal = /^(final|full time)$/i.test(detail);
+  if (detail) {
+    return detailLooksFinal ? `${item.league} · Final` : `${item.league} · ${detail}`;
   }
-  return detail ? `${item.league} · ${detail}` : item.league;
+  return item.status === "final" ? `${item.league} · Final` : item.league;
 }
 
 function formatDisplayActivityMeta(item: FeedItem): string {
@@ -646,13 +647,9 @@ void formatDisplayActivityMeta;
 function formatRenderedActivityMeta(item: FeedItem): string {
   const detail = cleanValue(item.statusDetail);
   const detailLooksFinal = /^(final|full time)$/i.test(detail);
-  const base = item.status === "final"
-    ? (detail
-        ? detailLooksFinal
-          ? `${item.league} | Final`
-          : `${item.league} | ${detail} | Final`
-        : `${item.league} | Final`)
-    : (detail ? `${item.league} | ${detail}` : item.league);
+  const base = detail
+    ? (detailLooksFinal ? `${item.league} | Final` : `${item.league} | ${detail}`)
+    : (item.status === "final" ? `${item.league} | Final` : item.league);
 
   return normalizeSafeDisplay(base)
     .replace(/\s*\?\s*/g, " | ")
