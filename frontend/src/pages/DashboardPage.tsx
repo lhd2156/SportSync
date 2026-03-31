@@ -533,19 +533,6 @@ function sortActivitiesForDisplay(
     .map(({ item }) => item);
 }
 
-function getActivityStatusPriority(status: string): number {
-  switch (status) {
-    case "live":
-      return 0;
-    case "upcoming":
-      return 1;
-    case "final":
-      return 2;
-    default:
-      return 3;
-  }
-}
-
 function sortSummaryActivitiesChronologically(items: ActivityItem[]): ActivityItem[] {
   return [...items].sort((a, b) => {
     const aWallclock = a.sortWallclock || "";
@@ -1798,39 +1785,17 @@ export default function DashboardPage() {
       activityDisplayOrder,
     );
   }, [activityDisplayOrder, activityLeagueFinalGames, buildDashboardGameSummaryActivities]);
-  const prioritizeCurrentDayActivity = useCallback((items: ActivityItem[]) => {
-    const currentDayKey = formatCompactDate(new Date());
-    const isCurrentDayActivity = !activityEffectiveDate || activityEffectiveDate === currentDayKey;
-    if (!items.length || !isCurrentDayActivity) {
-      return items;
-    }
-
-    return items
-      .map((item, index) => ({ item, index }))
-      .sort((left, right) => {
-        const priorityDelta =
-          getActivityStatusPriority(left.item.status) - getActivityStatusPriority(right.item.status);
-        if (priorityDelta !== 0) {
-          return priorityDelta;
-        }
-        return left.index - right.index;
-      })
-      .map(({ item }) => item);
-  }, [activityEffectiveDate]);
   const activityFeedFullyLoaded = activityAllItems.length > 0 && !activityHasMore;
   const displayActivityAllItems = useMemo(() => {
-    return prioritizeCurrentDayActivity(
-      mergeActivityFinalSummaries(
-        normalizeActivityItemsForDisplay(activityAllItems),
-        activityFeedFullyLoaded,
-      ),
+    return mergeActivityFinalSummaries(
+      normalizeActivityItemsForDisplay(activityAllItems),
+      activityFeedFullyLoaded,
     );
   }, [
     activityAllItems,
     activityFeedFullyLoaded,
     mergeActivityFinalSummaries,
     normalizeActivityItemsForDisplay,
-    prioritizeCurrentDayActivity,
   ]);
   const displayActivityItems = useMemo(() => {
     return mergeActivityFinalSummaries(

@@ -349,6 +349,50 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _normalize_mlb_inning_detail(value: str | None) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+
+    direct_match = _re.search(
+        r"\b(Top|Bottom|Bot|Middle|Mid|End)\s+(\d+)(st|nd|rd|th)\b",
+        cleaned,
+        _re.IGNORECASE,
+    )
+    if direct_match:
+        half = direct_match.group(1).strip().lower()
+        inning = direct_match.group(2)
+        suffix = direct_match.group(3)
+        label = {
+            "bottom": "Bot",
+            "bot": "Bot",
+            "middle": "Mid",
+            "mid": "Mid",
+            "end": "End",
+        }.get(half, "Top")
+        return f"{label} {inning}{suffix}"
+
+    inning_match = _re.search(
+        r"\b(Top|Bottom|Bot|Middle|Mid|End)\s+of\s+the\s+(\d+)(st|nd|rd|th)\s+inning\b",
+        cleaned,
+        _re.IGNORECASE,
+    )
+    if inning_match:
+        half = inning_match.group(1).strip().lower()
+        inning = inning_match.group(2)
+        suffix = inning_match.group(3)
+        label = {
+            "bottom": "Bot",
+            "bot": "Bot",
+            "middle": "Mid",
+            "mid": "Mid",
+            "end": "End",
+        }.get(half, "Top")
+        return f"{label} {inning}{suffix}"
+
+    return ""
+
+
 def _resolve_selected_standings_season(data: dict, season_year: str) -> dict:
     seasons = data.get("seasons") or []
     active_year = str(season_year or "").strip()
@@ -5610,6 +5654,7 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
             return None
 
     formatted = []
+    mlb_current_detail = ""
     at_bat_tracker: dict[str, dict] = {}  # event_id → {pitcher_name, pitcher_id, batter_name, batter_id}
     soccer_running_home_score = 0 if league_key == "EPL" else None
     soccer_running_away_score = 0 if league_key == "EPL" else None
@@ -6300,8 +6345,18 @@ async def _fetch_game_plays(event_id: str, league_key: str) -> list[dict]:
                     detail = "FT"
                 else:
                     detail = status_detail
+        elif league_key == "MLB":
+            detail = (
+                _normalize_mlb_inning_detail(clock)
+                or _normalize_mlb_inning_detail(text)
+                or mlb_current_detail
+                or status_detail
+            )
         else:
             detail = f"{period_label} {clock}" if clock else status_detail
+
+        if league_key == "MLB" and detail:
+            mlb_current_detail = detail
 
         # Skip anonymous shot plays ("makes 2-foot shot" with no player resolved)
         text_lower_anon = text.lower()
