@@ -521,6 +521,19 @@ function sortActivitiesForDisplay(
     .map(({ item }) => item);
 }
 
+function getActivityStatusPriority(status: string): number {
+  switch (status) {
+    case "live":
+      return 0;
+    case "upcoming":
+      return 1;
+    case "final":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
 function sortSummaryActivitiesChronologically(items: ActivityItem[]): ActivityItem[] {
   return [...items].sort((a, b) => {
     const aWallclock = a.sortWallclock || "";
@@ -629,6 +642,13 @@ export default function DashboardPage() {
     () => selectedDateKey === formatCompactDate(new Date()),
     [selectedDateKey],
   );
+  const normalizedActivityDate = useMemo(() => {
+    if (!activityDate) {
+      return "";
+    }
+
+    return activityDate === formatCompactDate(new Date()) ? "" : activityDate;
+  }, [activityDate]);
   const gamesQuery = useQuery<GameItem[]>({
     queryKey: ["dashboardGames", selectedDateKey],
     queryFn: async () => {
@@ -646,7 +666,6 @@ export default function DashboardPage() {
       }
       return undefined;
     })(),
-    placeholderData: (previousData) => previousData,
     refetchInterval: isSelectedDateToday ? LIVE_DASHBOARD_REFRESH_MS : false,
     refetchIntervalInBackground: false,
     staleTime: isSelectedDateToday ? 0 : 15 * 60_000,
@@ -1357,17 +1376,17 @@ export default function DashboardPage() {
   ]);
 
   const activityQuery = useQuery<ActivityCacheEntry>({
-    queryKey: ["dashboardActivity", activityDate || "LIVE", activityLeague],
+    queryKey: ["dashboardActivity", normalizedActivityDate || "LIVE", activityLeague],
     queryFn: async () => {
       try {
-        return await loadActivityFeed(activityDate || undefined, activityLeague);
+        return await loadActivityFeed(normalizedActivityDate || undefined, activityLeague);
       } catch {
         await warmApiConnection();
-        return loadActivityFeed(activityDate || undefined, activityLeague);
+        return loadActivityFeed(normalizedActivityDate || undefined, activityLeague);
       }
     },
     initialData: (() => {
-      const cacheKey = buildActivityCacheKey(activityDate || undefined, activityLeague);
+      const cacheKey = buildActivityCacheKey(normalizedActivityDate || undefined, activityLeague);
       const cachedEntry = activityResponseCacheRef.current[cacheKey];
       if (!cachedEntry?.items?.length) {
         return undefined;
@@ -1377,8 +1396,7 @@ export default function DashboardPage() {
         allItems: cachedEntry.allItems ?? cachedEntry.items,
       };
     })(),
-    placeholderData: (previousData) => previousData,
-    refetchInterval: !activityDate ? LIVE_DASHBOARD_REFRESH_MS : false,
+    refetchInterval: !normalizedActivityDate ? LIVE_DASHBOARD_REFRESH_MS : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     retry: false,
@@ -1729,7 +1747,7 @@ export default function DashboardPage() {
   }, [savedTeams]);
 
   const activityQueryData = activityQuery.data;
-  const activityEffectiveDate = activityQueryData?.effectiveDate || activityDate;
+  const activityEffectiveDate = activityDate || activityQueryData?.effectiveDate || normalizedActivityDate;
   const activityAllItems = useMemo(
     () => activityQueryData?.allItems ?? activityQueryData?.items ?? [],
     [activityQueryData],
@@ -1809,17 +1827,39 @@ export default function DashboardPage() {
       activityDisplayOrder,
     );
   }, [activityDisplayOrder, activityLeagueFinalGames, buildDashboardGameSummaryActivities]);
+  const prioritizeCurrentDayActivity = useCallback((items: ActivityItem[]) => {
+    const currentDayKey = formatCompactDate(new Date());
+    const isCurrentDayActivity = !activityEffectiveDate || activityEffectiveDate === currentDayKey;
+    if (!items.length || !isCurrentDayActivity) {
+      return items;
+    }
+
+    return items
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => {
+        const priorityDelta =
+          getActivityStatusPriority(left.item.status) - getActivityStatusPriority(right.item.status);
+        if (priorityDelta !== 0) {
+          return priorityDelta;
+        }
+        return left.index - right.index;
+      })
+      .map(({ item }) => item);
+  }, [activityEffectiveDate]);
   const activityFeedFullyLoaded = activityAllItems.length > 0 && !activityHasMore;
   const displayActivityAllItems = useMemo(() => {
-    return mergeActivityFinalSummaries(
-      normalizeActivityItemsForDisplay(activityAllItems),
-      activityFeedFullyLoaded,
+    return prioritizeCurrentDayActivity(
+      mergeActivityFinalSummaries(
+        normalizeActivityItemsForDisplay(activityAllItems),
+        activityFeedFullyLoaded,
+      ),
     );
   }, [
     activityAllItems,
     activityFeedFullyLoaded,
     mergeActivityFinalSummaries,
     normalizeActivityItemsForDisplay,
+    prioritizeCurrentDayActivity,
   ]);
   const displayActivityItems = useMemo(() => {
     return mergeActivityFinalSummaries(
