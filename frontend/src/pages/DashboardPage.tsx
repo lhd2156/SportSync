@@ -599,6 +599,7 @@ export default function DashboardPage() {
   const [hasResolvedGamesOnce, setHasResolvedGamesOnce] = useState(false);
   const [activityDate, setActivityDate] = useState<string>("");  // "" = today
   const [activityLeague, setActivityLeague] = useState<string>("ALL");
+  const [activityStatusFilter, setActivityStatusFilter] = useState<"all" | "live" | "final">("all");
   const [activityVisibleCount, setActivityVisibleCount] = useState(ACTIVITY_PAGE_SIZE);
   const predictionCacheRef = useRef<Record<string, PredictionCacheEntry>>(
     readSessionJson<Record<string, PredictionCacheEntry>>(PREDICTION_CACHE_STORAGE_KEY, {}),
@@ -642,13 +643,19 @@ export default function DashboardPage() {
     () => selectedDateKey === formatCompactDate(new Date()),
     [selectedDateKey],
   );
-  const normalizedActivityDate = useMemo(() => {
-    if (!activityDate) {
+  const activityRequestDate = useMemo(() => {
+    const todayKey = formatCompactDate(new Date());
+    const resolvedActivityDate = activityDate || selectedDateKey;
+    if (!resolvedActivityDate) {
       return "";
     }
 
-    return activityDate === formatCompactDate(new Date()) ? "" : activityDate;
-  }, [activityDate]);
+    if (resolvedActivityDate !== todayKey) {
+      return resolvedActivityDate;
+    }
+
+    return activityStatusFilter === "final" ? resolvedActivityDate : "";
+  }, [activityDate, activityStatusFilter, selectedDateKey]);
   const gamesQuery = useQuery<GameItem[]>({
     queryKey: ["dashboardGames", selectedDateKey],
     queryFn: async () => {
@@ -1376,17 +1383,17 @@ export default function DashboardPage() {
   ]);
 
   const activityQuery = useQuery<ActivityCacheEntry>({
-    queryKey: ["dashboardActivity", normalizedActivityDate || "LIVE", activityLeague],
+    queryKey: ["dashboardActivity", activityRequestDate || "LIVE", activityLeague],
     queryFn: async () => {
       try {
-        return await loadActivityFeed(normalizedActivityDate || undefined, activityLeague);
+        return await loadActivityFeed(activityRequestDate || undefined, activityLeague);
       } catch {
         await warmApiConnection();
-        return loadActivityFeed(normalizedActivityDate || undefined, activityLeague);
+        return loadActivityFeed(activityRequestDate || undefined, activityLeague);
       }
     },
     initialData: (() => {
-      const cacheKey = buildActivityCacheKey(normalizedActivityDate || undefined, activityLeague);
+      const cacheKey = buildActivityCacheKey(activityRequestDate || undefined, activityLeague);
       const cachedEntry = activityResponseCacheRef.current[cacheKey];
       if (!cachedEntry?.items?.length) {
         return undefined;
@@ -1396,7 +1403,7 @@ export default function DashboardPage() {
         allItems: cachedEntry.allItems ?? cachedEntry.items,
       };
     })(),
-    refetchInterval: !normalizedActivityDate ? LIVE_DASHBOARD_REFRESH_MS : false,
+    refetchInterval: !activityRequestDate ? LIVE_DASHBOARD_REFRESH_MS : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     retry: false,
@@ -1747,7 +1754,7 @@ export default function DashboardPage() {
   }, [savedTeams]);
 
   const activityQueryData = activityQuery.data;
-  const activityEffectiveDate = activityDate || activityQueryData?.effectiveDate || normalizedActivityDate;
+  const activityEffectiveDate = activityDate || activityQueryData?.effectiveDate || activityRequestDate;
   const activityAllItems = useMemo(
     () => activityQueryData?.allItems ?? activityQueryData?.items ?? [],
     [activityQueryData],
@@ -2198,6 +2205,11 @@ export default function DashboardPage() {
             error={activityUiError}
             activeLeague={activityLeague}
             savedTeams={savedTeams}
+            statusFilter={activityStatusFilter}
+            onStatusFilterChange={(nextStatus) => {
+              setActivityVisibleCount(ACTIVITY_PAGE_SIZE);
+              setActivityStatusFilter(nextStatus);
+            }}
             onLeagueChange={(league) => {
               setActivityLeague(league);
               setActivityVisibleCount(ACTIVITY_PAGE_SIZE);
