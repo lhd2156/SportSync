@@ -1397,8 +1397,8 @@ export default function DashboardPage() {
         allItems: cachedEntry.allItems ?? cachedEntry.items,
       };
     })(),
-    refetchInterval: !activityRequestDate ? LIVE_DASHBOARD_REFRESH_MS : false,
-    refetchIntervalInBackground: false,
+    refetchInterval: isSelectedDateToday ? LIVE_DASHBOARD_REFRESH_MS : false,
+    refetchIntervalInBackground: isSelectedDateToday,
     refetchOnWindowFocus: false,
     retry: false,
   });
